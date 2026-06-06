@@ -14,6 +14,7 @@ import { buildTerrain } from './render/terrainMesh.js';
 import { createBulletPool, syncBullets } from './render/bulletMesh.js';
 import { createMissilePool, syncMissiles } from './render/missileMesh.js';
 import { createHud } from './render/hud.js';
+import { targetIndicator } from './radar.js';
 import { createPlane, stepFlight } from './flight.js';
 import { createInput, onKeyDown, onKeyUp, readInputs } from './input.js';
 import { createGun, stepGun, stepBullets } from './weapons/gun.js';
@@ -200,9 +201,12 @@ function animate() {
   applyPlaneTransform(meshP2, plane2);
   syncBullets(bulletPool, bullets);       // 탄 트레이서 렌더 동기화
   syncMissiles(missilePool, missiles);    // 미사일 메시 렌더 동기화
-  hud.update(                             // 탄약/재장전 + 미사일 잔량/락온 표시
-    { gun: gun1, launcher: launcher1 },
-    { gun: gun2, launcher: launcher2 },
+  // 상대 방향 표시기 — 각 플레이어가 본 상대 기체 방위·거리
+  const ind1 = targetIndicator(plane1, plane2);
+  const ind2 = targetIndicator(plane2, plane1);
+  hud.update(                             // 탄약/재장전 + 미사일 잔량/락온 + 상대 방향
+    { gun: gun1, launcher: launcher1, target: ind1 },
+    { gun: gun2, launcher: launcher2, target: ind2 },
   );
 
   applyChase(cameraL, plane1);   // 좌 = P1

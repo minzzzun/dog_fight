@@ -39,16 +39,40 @@ function fmtMissile(launcher) {
   return `🚀 ${launcher.ammo}   ${lock}`;
 }
 
-// 인자 정규화: { gun, launcher } 또는 gun 객체 직접 전달 모두 수용.
+// 인자 정규화: { gun, launcher, target } 또는 gun 객체 직접 전달 모두 수용.
 function normalize(state) {
-  if (!state) return { gun: null, launcher: null };
-  if (state.gun || state.launcher) return { gun: state.gun || null, launcher: state.launcher || null };
-  return { gun: state, launcher: null };  // 하위호환: gun 객체 직접
+  if (!state) return { gun: null, launcher: null, target: null };
+  if (state.gun || state.launcher || state.target) {
+    return { gun: state.gun || null, launcher: state.launcher || null, target: state.target || null };
+  }
+  return { gun: state, launcher: null, target: null };  // 하위호환: gun 객체 직접
+}
+
+// 상대 방향 화살표(각 절반 상단 중앙). 멀 때만 표시.
+const ARROW_SHOW_DIST = 300;  // 이 거리(m) 이상이면 방향 화살표 표시
+
+function makeArrow(leftPercent) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText =
+    'position:fixed;top:24px;left:' + leftPercent + '%;transform:translateX(-50%);' +
+    'text-align:center;color:#ffd24a;font-family:system-ui,monospace;font-weight:700;' +
+    'text-shadow:0 1px 3px rgba(0,0,0,0.8);pointer-events:none;z-index:10;white-space:nowrap';
+  const arrow = document.createElement('div');
+  arrow.textContent = '➤';                       // 기본 오른쪽 향함 → 회전으로 방향 지정
+  arrow.style.cssText = 'font-size:34px;line-height:1;transition:transform 0.05s linear';
+  const label = document.createElement('div');
+  label.style.cssText = 'font-size:13px;margin-top:2px';
+  wrap.appendChild(arrow);
+  wrap.appendChild(label);
+  document.body.appendChild(wrap);
+  return { wrap, arrow, label };
 }
 
 export function createHud() {
-  const left = makePanel(25);   // 좌측 절반 중앙
-  const right = makePanel(75);  // 우측 절반 중앙
+  const left = makePanel(25);   // 좌측 절반 중앙(하단)
+  const right = makePanel(75);  // 우측 절반 중앙(하단)
+  const arrowL = makeArrow(25); // 좌측 상단 방향 화살표
+  const arrowR = makeArrow(75);
 
   function render(panel, state) {
     const { gun, launcher } = normalize(state);
@@ -57,9 +81,25 @@ export function createHud() {
     panel.innerHTML = line2 ? `${line1}<br>${line2}` : line1;
   }
 
+  // 방향 화살표: target.angle(rad, 0=정면/위, +=오른쪽)만큼 회전. 멀 때만 표시.
+  function renderArrow(ind, state) {
+    const { target } = normalize(state);
+    if (!target || target.distance < ARROW_SHOW_DIST) {
+      ind.wrap.style.display = 'none';
+      return;
+    }
+    ind.wrap.style.display = 'block';
+    // 기본 글리프 '➤'가 오른쪽(+90°)을 향하므로, 위(0°)=정면 기준으로 -90° 보정.
+    const deg = (target.angle * 180) / Math.PI - 90;
+    ind.arrow.style.transform = `rotate(${deg}deg)`;
+    ind.label.textContent = `상대 ${Math.round(target.distance)}m`;
+  }
+
   function update(p1, p2) {
     render(left, p1);
     render(right, p2);
+    renderArrow(arrowL, p1);
+    renderArrow(arrowR, p2);
   }
 
   return { update };
