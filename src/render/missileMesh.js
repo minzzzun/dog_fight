@@ -10,10 +10,14 @@
 //   createMissilePool(scene, maxMissiles?) → pool  (scene에 InstancedMesh 추가)
 //   syncMissiles(pool, missiles)                   (매 프레임 호출: 위치/방향/색/개수 갱신)
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 const DEFAULT_MAX = 16;        // 동시 표시 가능한 최대 미사일 수(2P × 2발 + 여유)
-const MISSILE_RADIUS = 1.5;    // 원뿔 밑면 반경(m)
-const MISSILE_LENGTH = 8;      // 원뿔 길이(m) — 멀리서도 보이게 약간 크게
+// 길쭉한 박스 동체 + 앞쪽 콘 노즈(둘 다 +Y 정렬 → 진행방향 회전 로직 재사용)
+const BODY_W = 1.6;            // 동체 한 변(정사각 단면)
+const BODY_LEN = 8;            // 동체 길이(m)
+const NOSE_R = 1.1;            // 노즈 콘 밑면 반경
+const NOSE_LEN = 4;            // 노즈 콘 길이
 
 // 소유자별 미사일 색(bulletMesh와 동일 컨벤션)
 const COLOR_P1 = new THREE.Color(0x33ffff);  // 청록(P1)
@@ -28,8 +32,11 @@ const _UP = new THREE.Vector3(0, 1, 0);  // ConeGeometry 기본 축(+Y)
 
 // 미사일 메시 풀 생성 — InstancedMesh 1개를 scene에 추가하고 핸들 반환.
 export function createMissilePool(scene, maxMissiles = DEFAULT_MAX) {
-  // 원뿔 기본 축은 +Y. 진행방향으로 회전시켜 정렬한다.
-  const geo = new THREE.ConeGeometry(MISSILE_RADIUS, MISSILE_LENGTH, 8);
+  // 동체(박스)+노즈(콘)를 +Y축에 정렬해 합친다(앞=+Y). 진행방향으로 회전 정렬.
+  const body = new THREE.BoxGeometry(BODY_W, BODY_LEN, BODY_W);
+  const nose = new THREE.ConeGeometry(NOSE_R, NOSE_LEN, 8);
+  nose.translate(0, BODY_LEN / 2 + NOSE_LEN / 2, 0);   // 동체 앞(+Y)에 노즈 부착
+  const geo = mergeGeometries([body, nose], false);
   const mat = new THREE.MeshBasicMaterial({ vertexColors: true });
 
   const mesh = new THREE.InstancedMesh(geo, mat, maxMissiles);

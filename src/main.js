@@ -14,6 +14,7 @@ import { buildTerrain } from './render/terrainMesh.js';
 import { createBulletPool, syncBullets } from './render/bulletMesh.js';
 import { createMissilePool, syncMissiles } from './render/missileMesh.js';
 import { createFlarePool, syncFlares } from './render/flareMesh.js';
+import { createMarker } from './render/marker.js';
 import { createHud } from './render/hud.js';
 import { targetIndicator } from './radar.js';
 import { createPlane, stepFlight } from './flight.js';
@@ -106,6 +107,10 @@ let disp1 = createFlareDispenser();
 let disp2 = createFlareDispenser();
 let flares = [];
 const flarePool = createFlarePool(scene);
+
+// 기체 위치 마커(컬러 빔) — 상대를 멀리서도 찾기 쉽게. 색=기체 색.
+const markerP1 = createMarker(scene, 0x2266ff);  // P1 파랑
+const markerP2 = createMarker(scene, 0xff3322);  // P2 빨강
 
 const hud = createHud();   // 분할 HUD(탄약/재장전 + 미사일 잔량/락온; M9에서 체력·플레어 확장)
 
@@ -236,6 +241,8 @@ function animate() {
   syncBullets(bulletPool, bullets);       // 탄 트레이서 렌더 동기화
   syncMissiles(missilePool, missiles);    // 미사일 메시 렌더 동기화
   syncFlares(flarePool, flares);          // 플레어 디코이 메시 렌더 동기화
+  markerP1.update(plane1.x, plane1.y, plane1.z);  // 위치 마커(상대 식별용)
+  markerP2.update(plane2.x, plane2.y, plane2.z);
   // 상대 방향 표시기 — 각 플레이어가 본 상대 기체 방위·거리
   const ind1 = targetIndicator(plane1, plane2);
   const ind2 = targetIndicator(plane2, plane1);

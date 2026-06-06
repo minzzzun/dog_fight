@@ -13,11 +13,11 @@ import * as THREE from 'three';
 import { FLARE_LIFE } from '../weapons/flare.js';
 
 const DEFAULT_MAX = 32;        // 동시 표시 가능한 최대 flare 수(2P × 3발 + 여유)
-const FLARE_RADIUS = 2.5;      // 발광 구 반경(m) — 멀리서도 보이게 약간 크게
+const FLARE_RADIUS = 6;        // 발광 구 반경(m) — 흰색·크게(멀리서도 잘 보이게)
 
-// 밝은 발광 색(디코이 불꽃)
-const COLOR_HOT  = new THREE.Color(0xffee44);  // 노랑(수명 많이 남음)
-const COLOR_COOL = new THREE.Color(0xff7722);  // 주황(수명 거의 없음)
+// 밝은 흰색 발광(디코이 불꽃) — 수명 끝까지 흰색 유지(약간만 어두워짐)
+const COLOR_HOT  = new THREE.Color(0xffffff);  // 흰색(수명 많이 남음)
+const COLOR_COOL = new THREE.Color(0xdddddd);  // 옅은 회백(수명 거의 없음)
 const _c = new THREE.Color();
 
 const _m = new THREE.Matrix4();
@@ -52,7 +52,7 @@ export function syncFlares(pool, flares) {
     const fl = flares[i];
     // 수명 비율(0~1): 수명이 줄수록 작아지고 색이 노랑→주황으로.
     const t = Math.max(0, Math.min(1, fl.life / FLARE_LIFE));
-    const s = 0.6 + 0.4 * t;          // 0.6~1.0 스케일 페이드
+    const s = 0.8 + 0.2 * t;          // 0.8~1.0 스케일(크게 유지)
 
     _pos.set(fl.x, fl.y, fl.z);
     _scl.set(s, s, s);
