@@ -9,11 +9,13 @@
 - [m0-scaffold.md](design/m0-scaffold.md) — 스캐폴드 + 분할 2뷰포트 렌더 설계.
 - [m1-flight.md](design/m1-flight.md) — 아케이드 비행 모델(stepFlight) 설계.
 - [m2-input.md](design/m2-input.md) — 2P 키 매핑(readInputs) 설계.
+- [m4-render.md](design/m4-render.md) — 렌더 결선(추격 카메라·기체 자세·분할 2뷰포트) 설계.
 
 ## 완료 노트 (done)
 - [m0-scaffold.md](done/m0-scaffold.md) — M0 스캐폴드(Vite+Three+Vitest, splitViewports 분할 렌더), 41 테스트 그린.
 - [m1-flight.md](done/m1-flight.md) — M1 아케이드 비행 모델(순수, 경계 강제선회), flight 테스트 42(전체 83 그린).
 - [m2-input.md](done/m2-input.md) — M2 2P 키 매핑(순수, held/엣지), input 테스트 39(전체 122 그린).
+- [m4-render.md](done/m4-render.md) — M4 렌더 결선(추격 카메라·기체 자세·2P 조종)+조향 뱅크 수정, chaseCamera 테스트 19(전체 141 그린).
 
 ## 진행 현황 (마일스톤)
 | # | 마일스톤 | 상태 | 문서 |
@@ -23,7 +25,7 @@
 | M1 | flight.js 비행 모델(위치/자세·경계 경고/강제선회) + 테스트 | ✅ 완료 | [done/m1-flight.md](done/m1-flight.md) |
 | M2 | input.js 2P 키 매핑 + 테스트 | ✅ 완료 | [done/m2-input.md](done/m2-input.md) |
 | M3 | terrain.js 고정맵(heightAt/충돌질의) + 섬·산·다리·바다 렌더 | ⬜ 대기 | — |
-| M4 | render(씬·분할 2추격카메라·기체 메시·스카이/바다) | ⬜ 대기 | — |
+| M4 | render(씬·분할 2추격카메라·기체 메시·스카이/바다) | ✅ 완료 | [done/m4-render.md](done/m4-render.md) |
 | M5 | weapons/gun.js 기관총(탄·재장전·데미지) + 테스트 | ⬜ 대기 | — |
 | M6 | weapons/missile.js 유도미사일(락온·유도·데미지·플레어회피) + 테스트 | ⬜ 대기 | — |
 | M7 | weapons/flare.js 플레어(전개·디코이) + 테스트 | ⬜ 대기 | — |

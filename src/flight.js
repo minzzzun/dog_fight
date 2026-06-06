@@ -94,15 +94,16 @@ export function forwardOf(state) {
 export function upOf(state) {
   const { yaw = 0, pitch = 0, roll = 0 } = state;
   // 기본 up (0,1,0)에 roll(Z축) → pitch(X) → yaw(Y) 적용
-  const rolled = rotZ({ x: 0, y: 1, z: 0 }, roll);
+  // roll>0(우뱅크)에서 up이 우측(+X)으로 기울어 우선회(yaw 감소)와 시각이 일치하도록 -roll 적용
+  const rolled = rotZ({ x: 0, y: 1, z: 0 }, -roll);
   return rotY(rotX(rolled, pitch), yaw);
 }
 
 // 우측 방향 — roll 반영
 export function rightOf(state) {
   const { yaw = 0, pitch = 0, roll = 0 } = state;
-  // 기본 right (1,0,0)에 roll(Z축) → pitch(X) → yaw(Y) 적용
-  const rolled = rotZ({ x: 1, y: 0, z: 0 }, roll);
+  // 기본 right (1,0,0)에 roll(Z축) → pitch(X) → yaw(Y) 적용 (up과 동일 부호 규약)
+  const rolled = rotZ({ x: 1, y: 0, z: 0 }, -roll);
   return rotY(rotX(rolled, pitch), yaw);
 }
 

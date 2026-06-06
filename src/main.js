@@ -1,10 +1,17 @@
-// M0 — 분할 2뷰포트 렌더 결선 (스캐폴드)
+// M4 — 렌더 결선: 비행 + 입력 + 추격 카메라 (분할 2뷰포트)
 //
 // 단일 WebGLRenderer + 단일 캔버스로 좌(P1)/우(P2) 두 번 그린다.
-// 공유 Scene 1개를 두 카메라가 각자 시점으로 렌더한다.
-// 게임 로직(비행/입력/무기)은 M1+. 여기선 플레이스홀더 기체 + 하늘/바다 배경만.
+// 공유 Scene 1개를 두 카메라가 각자 추격 시점으로 렌더한다.
+//   - 입력: createInput + window keydown/keyup → readInputs(프레임당 1회)
+//   - 비행: stepFlight(불변 반환) → applyPlaneTransform(메시 자세)
+//   - 카메라: chaseCameraPose(자세 추종형 3인칭) → 각 카메라에 적용
+// 무기/지형(섬·산)/HUD는 이후 마일스톤.
 import * as THREE from 'three';
 import { splitViewports } from './render/viewport.js';
+import { buildPlane, applyPlaneTransform } from './render/planeMesh.js';
+import { chaseCameraPose } from './render/chaseCamera.js';
+import { createPlane, stepFlight, WORLD_HALF } from './flight.js';
+import { createInput, onKeyDown, onKeyUp, readInputs } from './input.js';
 
 // ══════════════════════════════════════════════════════════════
 // 상수
@@ -54,45 +61,42 @@ sea.rotation.x = -Math.PI / 2;     // 수평면으로 눕힘
 sea.position.y = 0;
 scene.add(sea);
 
-// ══════════════════════════════════════════════════════════════
-// 플레이스홀더 기체 (P1 파랑 / P2 빨강)
-//   - 콘(동체) + 박스(날개) 조합. 서로 다른 위치/색.
-//   - +Z 가 기체 뒤쪽이 되도록 콘을 +Z 로 눕힌다(추격 카메라 배치 기준).
-// ══════════════════════════════════════════════════════════════
-function buildPlane(color) {
-  const group = new THREE.Group();
-
-  // 동체: 콘을 눕혀 기수가 -Z(전방)를 향하게 한다.
-  const bodyGeo = new THREE.ConeGeometry(1.2, 6, 16);
-  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.3 });
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.rotation.x = -Math.PI / 2;  // 콘 축(+Y)을 -Z(전방)로 회전
-  group.add(body);
-
-  // 주익: 가로로 긴 얇은 박스.
-  const wingGeo = new THREE.BoxGeometry(8, 0.3, 1.6);
-  const wingMat = new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.2 });
-  const wing = new THREE.Mesh(wingGeo, wingMat);
-  wing.position.z = 0.5;
-  group.add(wing);
-
-  return group;
-}
-
-const planeP1 = buildPlane(0x2266ff);
-planeP1.position.set(-40, 120, 0);
-scene.add(planeP1);
-
-const planeP2 = buildPlane(0xff3322);
-planeP2.position.set(40, 120, 0);
-scene.add(planeP2);
+// 월드 경계 시각(방향감 보조) — 수면 살짝 위에 그리드 한 장.
+const grid = new THREE.GridHelper(WORLD_HALF * 2, 40, 0x335577, 0x335577);
+grid.position.y = 1;
+scene.add(grid);
 
 // ══════════════════════════════════════════════════════════════
-// 카메라 2개 (P1/P2) — 기체 뒤·위 고정 오프셋 추격 흉내
+// 비행 상태 + 기체 메시 — 서로 마주보게 스폰(z를 ±300으로 벌림)
+//   forward 규약상 yaw=0 → -Z. P1은 yaw=π(기수 +Z, 상대 쪽),
+//   P2는 yaw=0(기수 -Z, 상대 쪽)으로 두면 양쪽 화면에 상대가 정면으로 보인다.
+//   x를 ±100으로 살짝 어긋나게 두면 정면충돌 없이 스쳐 지나간다.
+// ══════════════════════════════════════════════════════════════
+let plane1 = createPlane({ x: -100, y: 300, z:  300, yaw: Math.PI }); // 기수 +Z
+let plane2 = createPlane({ x:  100, y: 300, z: -300, yaw: 0 });       // 기수 -Z
+
+const meshP1 = buildPlane(0x2266ff);  // P1 파랑
+const meshP2 = buildPlane(0xff3322);  // P2 빨강
+scene.add(meshP1);
+scene.add(meshP2);
+
+// ══════════════════════════════════════════════════════════════
+// 입력 결선 (DOM ↔ input.js)
+//   매핑된 키만 preventDefault(화살표 스크롤·Space 등 방지).
+// ══════════════════════════════════════════════════════════════
+const input = createInput();
+
+window.addEventListener('keydown', (e) => {
+  if (onKeyDown(input, e.code)) e.preventDefault();
+});
+window.addEventListener('keyup', (e) => {
+  if (onKeyUp(input, e.code)) e.preventDefault();
+});
+
+// ══════════════════════════════════════════════════════════════
+// 카메라 2개 (P1/P2) — 자세 추종형 3인칭 추격
 //   aspect = 절반 폭 / 높이 (분할로 가로가 절반이 됨)
 // ══════════════════════════════════════════════════════════════
-const CHASE_OFFSET = new THREE.Vector3(0, 8, 20);  // 기체 뒤(+Z)·위(+Y)
-
 function makeCamera() {
   const aspect = (window.innerWidth / 2) / window.innerHeight;
   return new THREE.PerspectiveCamera(FOV, aspect, NEAR, FAR);
@@ -101,14 +105,14 @@ function makeCamera() {
 const cameraL = makeCamera();
 const cameraR = makeCamera();
 
-// 카메라를 해당 기체 뒤·위에 두고 기체를 바라본다.
-function placeChaseCamera(camera, plane) {
-  camera.position.copy(plane.position).add(CHASE_OFFSET);
-  camera.lookAt(plane.position);
+// 추격 카메라 포즈를 카메라에 적용.
+//   camera.up은 lookAt 전에 설정해야 lookAt이 그 up으로 회전을 잡는다(롤 반영). 순서 중요.
+function applyChase(camera, plane) {
+  const pose = chaseCameraPose(plane);
+  camera.position.set(pose.position.x, pose.position.y, pose.position.z);
+  camera.up.set(pose.up.x, pose.up.y, pose.up.z);
+  camera.lookAt(pose.lookAt.x, pose.lookAt.y, pose.lookAt.z);
 }
-
-placeChaseCamera(cameraL, planeP1);
-placeChaseCamera(cameraR, planeP2);
 
 // ══════════════════════════════════════════════════════════════
 // 분할 2뷰포트 렌더
@@ -130,7 +134,7 @@ function renderViews() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// 렌더 루프
+// 렌더 루프 — 입력 → 비행 적분 → 메시 자세 → 추격 카메라 → 분할 렌더
 // ══════════════════════════════════════════════════════════════
 const clock = new THREE.Clock();
 
@@ -138,9 +142,15 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), DELTA_CLAMP);
 
-  // M0: 움직임 확인용 살짝 회전(게임 로직 없음).
-  planeP1.rotation.y += dt * 0.3;
-  planeP2.rotation.y -= dt * 0.3;
+  const { p1, p2 } = readInputs(input);   // 프레임당 1회 (엣지 입력 1회만 소비)
+  plane1 = stepFlight(plane1, p1, dt);
+  plane2 = stepFlight(plane2, p2, dt);
+
+  applyPlaneTransform(meshP1, plane1);
+  applyPlaneTransform(meshP2, plane2);
+
+  applyChase(cameraL, plane1);   // 좌 = P1
+  applyChase(cameraR, plane2);   // 우 = P2
 
   renderViews();
 }
