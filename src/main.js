@@ -13,12 +13,15 @@ import { chaseCameraPose } from './render/chaseCamera.js';
 import { buildTerrain } from './render/terrainMesh.js';
 import { createBulletPool, syncBullets } from './render/bulletMesh.js';
 import { createMissilePool, syncMissiles } from './render/missileMesh.js';
+import { createFlarePool, syncFlares } from './render/flareMesh.js';
 import { createHud } from './render/hud.js';
 import { targetIndicator } from './radar.js';
 import { createPlane, stepFlight } from './flight.js';
 import { createInput, onKeyDown, onKeyUp, readInputs } from './input.js';
 import { createGun, stepGun, stepBullets } from './weapons/gun.js';
 import { createMissileLauncher, stepLock, stepMissiles } from './weapons/missile.js';
+import { createFlareDispenser, stepFlareDispenser, stepFlares } from './weapons/flare.js';
+import { forwardOf } from './flight.js';
 import { terrainCollision } from './terrain.js';
 
 // ══════════════════════════════════════════════════════════════
@@ -88,13 +91,21 @@ const bulletPool = createBulletPool(scene);
 // 유도미사일 (M6) — 플레이어별 런처(락온 상태기계) + 공용 미사일 풀
 //   launcher1/2: 순수 상태기계(stepLock). missiles: owner로 소속 구분하는 공용 배열.
 //   명중당 HP 차감은 M8 combat 범위 — 여기선 락온·발사·유도·명중판정·플레어회피까지.
-//   flares는 M7 범위 — 지금은 빈 목록(디코이 미발생).
 // ══════════════════════════════════════════════════════════════
 let launcher1 = createMissileLauncher();
 let launcher2 = createMissileLauncher();
 let missiles = [];
 const missilePool = createMissilePool(scene);
-const flares = [];   // M7에서 채워짐 — 현재는 빈 목록
+
+// ══════════════════════════════════════════════════════════════
+// 플레어 (M7) — 플레이어별 디스펜서(전개·잔량·쿨다운) + 공용 flare 풀
+//   disp1/2: 순수 상태기계(stepFlareDispenser). flares: owner로 소속 구분하는 공용 배열.
+//   stepMissiles가 이 flares를 읽어 디코이 회피를 판정(미사일이 플레어에 빗나감).
+// ══════════════════════════════════════════════════════════════
+let disp1 = createFlareDispenser();
+let disp2 = createFlareDispenser();
+let flares = [];
+const flarePool = createFlarePool(scene);
 
 const hud = createHud();   // 분할 HUD(탄약/재장전 + 미사일 잔량/락온; M9에서 체력·플레어 확장)
 
@@ -193,6 +204,29 @@ function animate() {
   if (lock1.fired) missiles.push(lock1.fired);
   if (lock2.fired) missiles.push(lock2.fired);
 
+  // ── 플레어: 전개(stepFlareDispenser) → 공용 풀 합류 → 수명관리(stepFlares) ──
+  //   flare 키 엣지(p*.flare)를 deploy로 전달. vel은 기수방향×속력(전개 분리감용).
+  const f1 = forwardOf(plane1);
+  const d1 = stepFlareDispenser(disp1, {
+    deploy: p1.flare, owner: 0,
+    pos: { x: plane1.x, y: plane1.y, z: plane1.z },
+    vel: { x: f1.x * plane1.speed, y: f1.y * plane1.speed, z: f1.z * plane1.speed },
+  }, dt);
+  disp1 = d1.state;
+  if (d1.flare) flares.push(d1.flare);
+
+  const f2 = forwardOf(plane2);
+  const d2 = stepFlareDispenser(disp2, {
+    deploy: p2.flare, owner: 1,
+    pos: { x: plane2.x, y: plane2.y, z: plane2.z },
+    vel: { x: f2.x * plane2.speed, y: f2.y * plane2.speed, z: f2.z * plane2.speed },
+  }, dt);
+  disp2 = d2.state;
+  if (d2.flare) flares.push(d2.flare);
+
+  flares = stepFlares(flares, dt);
+
+  // 채워진 flares를 stepMissiles가 소비 → 디코이 회피 판정.
   const steppedM = stepMissiles(missiles, dt, targets, flares, bulletTerrain);
   missiles = steppedM.missiles;
   // steppedM.hits(damage:50)도 M8 combat에서 HP 적용 — 지금은 무시.
@@ -201,12 +235,13 @@ function animate() {
   applyPlaneTransform(meshP2, plane2);
   syncBullets(bulletPool, bullets);       // 탄 트레이서 렌더 동기화
   syncMissiles(missilePool, missiles);    // 미사일 메시 렌더 동기화
+  syncFlares(flarePool, flares);          // 플레어 디코이 메시 렌더 동기화
   // 상대 방향 표시기 — 각 플레이어가 본 상대 기체 방위·거리
   const ind1 = targetIndicator(plane1, plane2);
   const ind2 = targetIndicator(plane2, plane1);
-  hud.update(                             // 탄약/재장전 + 미사일 잔량/락온 + 상대 방향
-    { gun: gun1, launcher: launcher1, target: ind1 },
-    { gun: gun2, launcher: launcher2, target: ind2 },
+  hud.update(                             // 탄약/재장전 + 미사일 잔량/락온 + 플레어 잔량 + 상대 방향
+    { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1 },
+    { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2 },
   );
 
   applyChase(cameraL, plane1);   // 좌 = P1

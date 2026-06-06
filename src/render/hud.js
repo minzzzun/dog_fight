@@ -24,8 +24,8 @@ function fmtGun(gun) {
   return `🔫 ${gun.ammo} / 100`;
 }
 
-// 런처 잔량 + 락온 상태 한 줄. launcher 없으면 빈 문자열.
-function fmtMissile(launcher) {
+// 런처 잔량 + 락온 상태 + 플레어 잔량 한 줄. launcher 없으면 빈 문자열.
+function fmtMissile(launcher, dispenser) {
   if (!launcher) return '';
   let lock;
   if (launcher.locked) {
@@ -36,16 +36,22 @@ function fmtMissile(launcher) {
   } else {
     lock = '—';
   }
-  return `🚀 ${launcher.ammo}   ${lock}`;
+  const flare = dispenser ? `   ✦ ${dispenser.ammo}` : '';
+  return `🚀 ${launcher.ammo}   ${lock}${flare}`;
 }
 
 // 인자 정규화: { gun, launcher, target } 또는 gun 객체 직접 전달 모두 수용.
 function normalize(state) {
-  if (!state) return { gun: null, launcher: null, target: null };
-  if (state.gun || state.launcher || state.target) {
-    return { gun: state.gun || null, launcher: state.launcher || null, target: state.target || null };
+  if (!state) return { gun: null, launcher: null, target: null, dispenser: null };
+  if (state.gun || state.launcher || state.target || state.dispenser) {
+    return {
+      gun: state.gun || null,
+      launcher: state.launcher || null,
+      target: state.target || null,
+      dispenser: state.dispenser || null,
+    };
   }
-  return { gun: state, launcher: null, target: null };  // 하위호환: gun 객체 직접
+  return { gun: state, launcher: null, target: null, dispenser: null };  // 하위호환: gun 객체 직접
 }
 
 // 상대 방향 화살표(각 절반 상단 중앙). 멀 때만 표시.
@@ -75,9 +81,9 @@ export function createHud() {
   const arrowR = makeArrow(75);
 
   function render(panel, state) {
-    const { gun, launcher } = normalize(state);
+    const { gun, launcher, dispenser } = normalize(state);
     const line1 = fmtGun(gun);
-    const line2 = fmtMissile(launcher);
+    const line2 = fmtMissile(launcher, dispenser);
     panel.innerHTML = line2 ? `${line1}<br>${line2}` : line1;
   }
 
