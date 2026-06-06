@@ -10,7 +10,8 @@ import * as THREE from 'three';
 import { splitViewports } from './render/viewport.js';
 import { buildPlane, applyPlaneTransform } from './render/planeMesh.js';
 import { chaseCameraPose } from './render/chaseCamera.js';
-import { createPlane, stepFlight, WORLD_HALF } from './flight.js';
+import { buildTerrain } from './render/terrainMesh.js';
+import { createPlane, stepFlight } from './flight.js';
 import { createInput, onKeyDown, onKeyUp, readInputs } from './input.js';
 
 // ══════════════════════════════════════════════════════════════
@@ -20,9 +21,7 @@ const FOV = 75;
 const NEAR = 0.1;
 const FAR = 5000;
 const DELTA_CLAMP = 0.05;          // 렌더 루프 delta clamp (CGs 관례)
-const SEA_SIZE = 8000;             // 바다 평면 한 변 길이(m)
 const SKY_COLOR = 0x87ceeb;        // 하늘색
-const SEA_COLOR = 0x1e6fb0;        // 바다색
 
 // ══════════════════════════════════════════════════════════════
 // Three.js 초기화 — 단일 렌더러 / 단일 캔버스
@@ -48,23 +47,11 @@ dirLight.position.set(200, 400, 100);
 scene.add(dirLight);
 
 // ══════════════════════════════════════════════════════════════
-// 배경 — 바다 평면 (y=0)
+// 지형 — 고정 설계맵(섬·산·고산·다리). 단일 표면(바다=저지대 물색)이라 별도
+//   해수면 평면 없음 → z-fighting 원천 제거. 공유 scene에 add해 두 카메라 노출.
 // ══════════════════════════════════════════════════════════════
-const seaGeo = new THREE.PlaneGeometry(SEA_SIZE, SEA_SIZE);
-const seaMat = new THREE.MeshStandardMaterial({
-  color: SEA_COLOR,
-  roughness: 0.4,
-  metalness: 0.1,
-});
-const sea = new THREE.Mesh(seaGeo, seaMat);
-sea.rotation.x = -Math.PI / 2;     // 수평면으로 눕힘
-sea.position.y = 0;
-scene.add(sea);
-
-// 월드 경계 시각(방향감 보조) — 수면 살짝 위에 그리드 한 장.
-const grid = new THREE.GridHelper(WORLD_HALF * 2, 40, 0x335577, 0x335577);
-grid.position.y = 1;
-scene.add(grid);
+const terrain = buildTerrain();
+scene.add(terrain);
 
 // ══════════════════════════════════════════════════════════════
 // 비행 상태 + 기체 메시 — 서로 마주보게 스폰(z를 ±300으로 벌림)
