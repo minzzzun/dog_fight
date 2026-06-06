@@ -6,16 +6,16 @@
 - [seed.md](spec/seed.md) — Ouroboros Seed 명세. GOAL·제약·ACCEPTANCE_CRITERIA·온톨로지·확정된 게임 디자인 결정·전투 수치·조작 바인딩.
 
 ## 설계 (design)
-- _(아직 없음 — 각 마일스톤 착수 시 `mds/design/<feature>.md` 생성 후 여기에 등록)_
+- [m0-scaffold.md](design/m0-scaffold.md) — 스캐폴드 + 분할 2뷰포트 렌더 설계.
 
 ## 완료 노트 (done)
-- _(아직 없음 — 마일스톤 완료 시 `mds/done/<milestone>.md` 생성 후 여기에 등록)_
+- [m0-scaffold.md](done/m0-scaffold.md) — M0 스캐폴드(Vite+Three+Vitest, splitViewports 분할 렌더), 41 테스트 그린.
 
 ## 진행 현황 (마일스톤)
 | # | 마일스톤 | 상태 | 문서 |
 |---|---|---|---|
 | M-S | Ouroboros 인터뷰 → Seed 명세 | ✅ 완료 | [spec/seed.md](spec/seed.md) |
-| M0 | 스캐폴드 (Vite+Three+Vitest, 분할 2뷰포트 렌더, 플레이스홀더 기체) | ⬜ 대기 | — |
+| M0 | 스캐폴드 (Vite+Three+Vitest, 분할 2뷰포트 렌더, 플레이스홀더 기체) | ✅ 완료 | [done/m0-scaffold.md](done/m0-scaffold.md) |
 | M1 | flight.js 비행 모델(위치/자세·경계 경고/강제선회) + 테스트 | ⬜ 대기 | — |
 | M2 | input.js 2P 키 매핑 + 테스트 | ⬜ 대기 | — |
 | M3 | terrain.js 고정맵(heightAt/충돌질의) + 섬·산·다리·바다 렌더 | ⬜ 대기 | — |
