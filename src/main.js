@@ -24,6 +24,7 @@ import { createMissileLauncher, stepLock, stepMissiles } from './weapons/missile
 import { createFlareDispenser, stepFlareDispenser, stepFlares } from './weapons/flare.js';
 import { forwardOf } from './flight.js';
 import { terrainCollision } from './terrain.js';
+import { createCombat, stepCombat, CRASH_MARGIN } from './combat.js';
 
 // ══════════════════════════════════════════════════════════════
 // 상수
@@ -112,7 +113,37 @@ const flarePool = createFlarePool(scene);
 const markerP1 = createMarker(scene, 0x2266ff);  // P1 파랑
 const markerP2 = createMarker(scene, 0xff3322);  // P2 빨강
 
-const hud = createHud();   // 분할 HUD(탄약/재장전 + 미사일 잔량/락온; M9에서 체력·플레어 확장)
+const hud = createHud();   // 분할 HUD(탄약/재장전 + 미사일 잔량/락온 + 체력; M9에서 체력바 폴리시)
+
+// ══════════════════════════════════════════════════════════════
+// 전투 상태 (M8) — 체력/충돌/승패. stepCombat이 hits·충돌을 소비해 HP/생사 갱신.
+//   combat.state==='over'면 비행/무기/입력 step을 멈추고 결과 오버레이를 1회 띄운다.
+// ══════════════════════════════════════════════════════════════
+let combat = createCombat();
+let resultShown = false;   // 결과 오버레이 1회 표시 가드
+
+// 결과 오버레이(최소) — DOM 풀스크린. winner: 0(P1승)/1(P2승)/'draw'(무승부).
+//   재대결 버튼 동작은 M11. 지금은 새로고침 안내로 충분.
+function showResult(winner) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText =
+    'position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;' +
+    'justify-content:center;gap:14px;background:rgba(0,0,0,0.6);' +
+    'color:#fff;font-family:system-ui,monospace;z-index:100;pointer-events:none';
+  let msg;
+  if (winner === 0) msg = 'P1 승리';
+  else if (winner === 1) msg = 'P2 승리';
+  else msg = '무승부';
+  const title = document.createElement('div');
+  title.style.cssText = 'font-size:48px;font-weight:800;text-shadow:0 2px 8px rgba(0,0,0,0.8)';
+  title.textContent = msg;
+  const hint = document.createElement('div');
+  hint.style.cssText = 'font-size:18px;opacity:0.85';
+  hint.textContent = '(M11에서 재대결 버튼 — 지금은 새로고침으로 재시작)';
+  overlay.appendChild(title);
+  overlay.appendChild(hint);
+  document.body.appendChild(overlay);
+}
 
 // 지형/수면 충돌로 탄 소멸시키는 래퍼(탄은 점 → margin 0).
 const bulletTerrain = (x, y, z) => terrainCollision(x, y, z, 0);
@@ -179,62 +210,85 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), DELTA_CLAMP);
 
-  const { p1, p2 } = readInputs(input);   // 프레임당 1회 (엣지 입력 1회만 소비)
-  plane1 = stepFlight(plane1, p1, dt);
-  plane2 = stepFlight(plane2, p2, dt);
+  // 전투 종료 후엔 비행/무기/입력 적분을 멈추고 렌더만 계속(사망 후 조종/발사 정지).
+  const fighting = combat.state !== 'over';
 
-  // ── 기관총: 발사(stepGun) → 공용 풀에 합류 → 이동·명중·소멸(stepBullets) ──
-  const fire1 = stepGun(gun1, { firing: p1.gun, shooter: { ...plane1, owner: 0 } }, dt);
-  gun1 = fire1.gun;
-  const fire2 = stepGun(gun2, { firing: p2.gun, shooter: { ...plane2, owner: 1 } }, dt);
-  gun2 = fire2.gun;
-  if (fire1.bullets.length) bullets.push(...fire1.bullets);
-  if (fire2.bullets.length) bullets.push(...fire2.bullets);
+  if (fighting) {
+    const { p1, p2 } = readInputs(input);   // 프레임당 1회 (엣지 입력 1회만 소비)
 
-  const targets = [
-    { owner: 0, x: plane1.x, y: plane1.y, z: plane1.z, alive: true },
-    { owner: 1, x: plane2.x, y: plane2.y, z: plane2.z, alive: true },
-  ];
-  const stepped = stepBullets(bullets, dt, targets, bulletTerrain);
-  bullets = stepped.bullets;
-  // hits는 M8 combat에서 HP 적용 — 지금은 무시(필요 시 디버그 로그).
-  // if (stepped.hits.length) console.log('hit', stepped.hits);
+    // 죽은 기체는 비행/발사 정지. 무기 명중 후보에서도 제외(targets.alive 동기화).
+    const p0Alive = combat.players[0].alive;
+    const p1Alive = combat.players[1].alive;
 
-  // ── 유도미사일: 락온(stepLock) → 발사 시 공용 풀 합류 → 유도·명중·소멸(stepMissiles) ──
-  //   각 플레이어의 target은 상대 기체. missile 엣지(p*.missile)를 tryLock으로 전달.
-  const lock1 = stepLock(launcher1, { tryLock: p1.missile, shooter: { ...plane1, owner: 0 }, target: targets[1] }, dt);
-  launcher1 = lock1.launcher;
-  const lock2 = stepLock(launcher2, { tryLock: p2.missile, shooter: { ...plane2, owner: 1 }, target: targets[0] }, dt);
-  launcher2 = lock2.launcher;
-  if (lock1.fired) missiles.push(lock1.fired);
-  if (lock2.fired) missiles.push(lock2.fired);
+    if (p0Alive) plane1 = stepFlight(plane1, p1, dt);
+    if (p1Alive) plane2 = stepFlight(plane2, p2, dt);
 
-  // ── 플레어: 전개(stepFlareDispenser) → 공용 풀 합류 → 수명관리(stepFlares) ──
-  //   flare 키 엣지(p*.flare)를 deploy로 전달. vel은 기수방향×속력(전개 분리감용).
-  const f1 = forwardOf(plane1);
-  const d1 = stepFlareDispenser(disp1, {
-    deploy: p1.flare, owner: 0,
-    pos: { x: plane1.x, y: plane1.y, z: plane1.z },
-    vel: { x: f1.x * plane1.speed, y: f1.y * plane1.speed, z: f1.z * plane1.speed },
-  }, dt);
-  disp1 = d1.state;
-  if (d1.flare) flares.push(d1.flare);
+    // ── 기관총: 발사(stepGun) → 공용 풀에 합류 → 이동·명중·소멸(stepBullets) ──
+    const fire1 = stepGun(gun1, { firing: p0Alive && p1.gun, shooter: { ...plane1, owner: 0 } }, dt);
+    gun1 = fire1.gun;
+    const fire2 = stepGun(gun2, { firing: p1Alive && p2.gun, shooter: { ...plane2, owner: 1 } }, dt);
+    gun2 = fire2.gun;
+    if (fire1.bullets.length) bullets.push(...fire1.bullets);
+    if (fire2.bullets.length) bullets.push(...fire2.bullets);
 
-  const f2 = forwardOf(plane2);
-  const d2 = stepFlareDispenser(disp2, {
-    deploy: p2.flare, owner: 1,
-    pos: { x: plane2.x, y: plane2.y, z: plane2.z },
-    vel: { x: f2.x * plane2.speed, y: f2.y * plane2.speed, z: f2.z * plane2.speed },
-  }, dt);
-  disp2 = d2.state;
-  if (d2.flare) flares.push(d2.flare);
+    // 죽은 기체는 alive=false → 무기 명중 후보에서 제외(stepBullets/stepMissiles가 무시).
+    const targets = [
+      { owner: 0, x: plane1.x, y: plane1.y, z: plane1.z, alive: p0Alive },
+      { owner: 1, x: plane2.x, y: plane2.y, z: plane2.z, alive: p1Alive },
+    ];
+    const stepped = stepBullets(bullets, dt, targets, bulletTerrain);
+    bullets = stepped.bullets;
 
-  flares = stepFlares(flares, dt);
+    // ── 유도미사일: 락온(stepLock) → 발사 시 공용 풀 합류 → 유도·명중·소멸(stepMissiles) ──
+    //   각 플레이어의 target은 상대 기체. missile 엣지(p*.missile)를 tryLock으로 전달.
+    const lock1 = stepLock(launcher1, { tryLock: p0Alive && p1.missile, shooter: { ...plane1, owner: 0 }, target: targets[1] }, dt);
+    launcher1 = lock1.launcher;
+    const lock2 = stepLock(launcher2, { tryLock: p1Alive && p2.missile, shooter: { ...plane2, owner: 1 }, target: targets[0] }, dt);
+    launcher2 = lock2.launcher;
+    if (lock1.fired) missiles.push(lock1.fired);
+    if (lock2.fired) missiles.push(lock2.fired);
 
-  // 채워진 flares를 stepMissiles가 소비 → 디코이 회피 판정.
-  const steppedM = stepMissiles(missiles, dt, targets, flares, bulletTerrain);
-  missiles = steppedM.missiles;
-  // steppedM.hits(damage:50)도 M8 combat에서 HP 적용 — 지금은 무시.
+    // ── 플레어: 전개(stepFlareDispenser) → 공용 풀 합류 → 수명관리(stepFlares) ──
+    //   flare 키 엣지(p*.flare)를 deploy로 전달. vel은 기수방향×속력(전개 분리감용).
+    const f1 = forwardOf(plane1);
+    const d1 = stepFlareDispenser(disp1, {
+      deploy: p0Alive && p1.flare, owner: 0,
+      pos: { x: plane1.x, y: plane1.y, z: plane1.z },
+      vel: { x: f1.x * plane1.speed, y: f1.y * plane1.speed, z: f1.z * plane1.speed },
+    }, dt);
+    disp1 = d1.state;
+    if (d1.flare) flares.push(d1.flare);
+
+    const f2 = forwardOf(plane2);
+    const d2 = stepFlareDispenser(disp2, {
+      deploy: p1Alive && p2.flare, owner: 1,
+      pos: { x: plane2.x, y: plane2.y, z: plane2.z },
+      vel: { x: f2.x * plane2.speed, y: f2.y * plane2.speed, z: f2.z * plane2.speed },
+    }, dt);
+    disp2 = d2.state;
+    if (d2.flare) flares.push(d2.flare);
+
+    flares = stepFlares(flares, dt);
+
+    // 채워진 flares를 stepMissiles가 소비 → 디코이 회피 판정.
+    const steppedM = stepMissiles(missiles, dt, targets, flares, bulletTerrain);
+    missiles = steppedM.missiles;
+
+    // ── 전투(M8): 기관총(-1)·미사일(-50) hits 합쳐 HP 적용 + 지형/수면 충돌 즉사 + 승패 ──
+    const hits = [...stepped.hits, ...steppedM.hits];
+    combat = stepCombat(combat, {
+      hits,
+      planes: [plane1, plane2],
+      terrainFn: (x, y, z) => terrainCollision(x, y, z, CRASH_MARGIN),
+      margin: CRASH_MARGIN,
+    });
+
+    // 전투 종료 → 결과 오버레이 1회 표시.
+    if (combat.state === 'over' && !resultShown) {
+      resultShown = true;
+      showResult(combat.winner);
+    }
+  }
 
   applyPlaneTransform(meshP1, plane1);
   applyPlaneTransform(meshP2, plane2);
@@ -246,9 +300,9 @@ function animate() {
   // 상대 방향 표시기 — 각 플레이어가 본 상대 기체 방위·거리
   const ind1 = targetIndicator(plane1, plane2);
   const ind2 = targetIndicator(plane2, plane1);
-  hud.update(                             // 탄약/재장전 + 미사일 잔량/락온 + 플레어 잔량 + 상대 방향
-    { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1 },
-    { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2 },
+  hud.update(                             // 체력 + 탄약/재장전 + 미사일 잔량/락온 + 플레어 잔량 + 상대 방향
+    { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1, hp: combat.players[0].hp },
+    { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2, hp: combat.players[1].hp },
   );
 
   applyChase(cameraL, plane1);   // 좌 = P1

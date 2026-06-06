@@ -24,6 +24,12 @@ function fmtGun(gun) {
   return `🔫 ${gun.ammo} / 100`;
 }
 
+// 체력 한 줄(최소 표시; M9에서 체력바로 폴리시). hp 없으면 빈 문자열.
+function fmtHp(hp) {
+  if (typeof hp !== 'number') return '';
+  return `❤️ ${Math.max(0, Math.round(hp))}`;
+}
+
 // 런처 잔량 + 락온 상태 + 플레어 잔량 한 줄. launcher 없으면 빈 문자열.
 function fmtMissile(launcher, dispenser) {
   if (!launcher) return '';
@@ -43,15 +49,16 @@ function fmtMissile(launcher, dispenser) {
 // 인자 정규화: { gun, launcher, target } 또는 gun 객체 직접 전달 모두 수용.
 function normalize(state) {
   if (!state) return { gun: null, launcher: null, target: null, dispenser: null };
-  if (state.gun || state.launcher || state.target || state.dispenser) {
+  if (state.gun || state.launcher || state.target || state.dispenser || typeof state.hp === 'number') {
     return {
       gun: state.gun || null,
       launcher: state.launcher || null,
       target: state.target || null,
       dispenser: state.dispenser || null,
+      hp: typeof state.hp === 'number' ? state.hp : null,
     };
   }
-  return { gun: state, launcher: null, target: null, dispenser: null };  // 하위호환: gun 객체 직접
+  return { gun: state, launcher: null, target: null, dispenser: null, hp: null };  // 하위호환: gun 객체 직접
 }
 
 // 상대 방향 화살표(각 절반 상단 중앙). 멀 때만 표시.
@@ -81,10 +88,12 @@ export function createHud() {
   const arrowR = makeArrow(75);
 
   function render(panel, state) {
-    const { gun, launcher, dispenser } = normalize(state);
+    const { gun, launcher, dispenser, hp } = normalize(state);
+    const hpLine = fmtHp(hp);
     const line1 = fmtGun(gun);
     const line2 = fmtMissile(launcher, dispenser);
-    panel.innerHTML = line2 ? `${line1}<br>${line2}` : line1;
+    const lines = [hpLine, line1, line2].filter((s) => s);
+    panel.innerHTML = lines.join('<br>');
   }
 
   // 방향 화살표: target.angle(rad, 0=정면/위, +=오른쪽)만큼 회전. 멀 때만 표시.

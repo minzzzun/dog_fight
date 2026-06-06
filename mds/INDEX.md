@@ -14,6 +14,7 @@
 - [m5-gun.md](design/m5-gun.md) — 기관총(탄창·재장전·탄 명중판정) 설계.
 - [m6-missile.md](design/m6-missile.md) — 유도미사일(락온·유도·플레어회피) 설계.
 - [m7-flare.md](design/m7-flare.md) — 플레어(디코이·잔량·쿨다운) 설계.
+- [m8-combat.md](design/m8-combat.md) — 전투(체력/충돌 즉사/승패) 설계.
 
 ## 완료 노트 (done)
 - [m0-scaffold.md](done/m0-scaffold.md) — M0 스캐폴드(Vite+Three+Vitest, splitViewports 분할 렌더), 41 테스트 그린.
@@ -24,6 +25,7 @@
 - [m5-gun.md](done/m5-gun.md) — M5 기관총(탄 트레이서·재장전·탄약 HUD), gun 테스트 35(전체 207 그린).
 - [m6-missile.md](done/m6-missile.md) — M6 유도미사일(락온 2s·유도·플레어회피 준비), missile 테스트 51(전체 258 그린).
 - [m7-flare.md](done/m7-flare.md) — M7 플레어(미사일 디코이·잔량·쿨다운) + 상대 방향 표시기, flare 테스트 24(전체 290 그린).
+- [m8-combat.md](done/m8-combat.md) — M8 전투(체력·충돌 즉사·승패) + 위치 마커/미사일 모양 폴리시, combat 테스트 48(전체 338 그린).
 
 ## 진행 현황 (마일스톤)
 | # | 마일스톤 | 상태 | 문서 |
@@ -37,7 +39,7 @@
 | M5 | weapons/gun.js 기관총(탄·재장전·데미지) + 테스트 | ✅ 완료 | [done/m5-gun.md](done/m5-gun.md) |
 | M6 | weapons/missile.js 유도미사일(락온·유도·데미지·플레어회피) + 테스트 | ✅ 완료 | [done/m6-missile.md](done/m6-missile.md) |
 | M7 | weapons/flare.js 플레어(전개·디코이) + 테스트 | ✅ 완료 | [done/m7-flare.md](done/m7-flare.md) |
-| M8 | combat.js 체력/사망/충돌(즉사·승패) + 테스트 | ⬜ 대기 | — |
+| M8 | combat.js 체력/사망/충돌(즉사·승패) + 테스트 | ✅ 완료 | [done/m8-combat.md](done/m8-combat.md) |
 | M9 | 분할 HUD(체력·탄약·미사일/플레어·락온·경계경고) | ⬜ 대기 | — |
 | M10 | 사운드(엔진+효과음+음악) | ⬜ 대기 | — |
 | M11 | 시작화면(색 선택 중복불가) + 결과창/재대결 | ⬜ 대기 | — |
