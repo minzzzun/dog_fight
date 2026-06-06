@@ -12,10 +12,12 @@ import { buildPlane, applyPlaneTransform } from './render/planeMesh.js';
 import { chaseCameraPose } from './render/chaseCamera.js';
 import { buildTerrain } from './render/terrainMesh.js';
 import { createBulletPool, syncBullets } from './render/bulletMesh.js';
+import { createMissilePool, syncMissiles } from './render/missileMesh.js';
 import { createHud } from './render/hud.js';
 import { createPlane, stepFlight } from './flight.js';
 import { createInput, onKeyDown, onKeyUp, readInputs } from './input.js';
 import { createGun, stepGun, stepBullets } from './weapons/gun.js';
+import { createMissileLauncher, stepLock, stepMissiles } from './weapons/missile.js';
 import { terrainCollision } from './terrain.js';
 
 // ══════════════════════════════════════════════════════════════
@@ -80,7 +82,20 @@ let gun1 = createGun();
 let gun2 = createGun();
 let bullets = [];
 const bulletPool = createBulletPool(scene);
-const hud = createHud();   // 분할 HUD(탄약/재장전; M9에서 확장)
+
+// ══════════════════════════════════════════════════════════════
+// 유도미사일 (M6) — 플레이어별 런처(락온 상태기계) + 공용 미사일 풀
+//   launcher1/2: 순수 상태기계(stepLock). missiles: owner로 소속 구분하는 공용 배열.
+//   명중당 HP 차감은 M8 combat 범위 — 여기선 락온·발사·유도·명중판정·플레어회피까지.
+//   flares는 M7 범위 — 지금은 빈 목록(디코이 미발생).
+// ══════════════════════════════════════════════════════════════
+let launcher1 = createMissileLauncher();
+let launcher2 = createMissileLauncher();
+let missiles = [];
+const missilePool = createMissilePool(scene);
+const flares = [];   // M7에서 채워짐 — 현재는 빈 목록
+
+const hud = createHud();   // 분할 HUD(탄약/재장전 + 미사일 잔량/락온; M9에서 체력·플레어 확장)
 
 // 지형/수면 충돌로 탄 소멸시키는 래퍼(탄은 점 → margin 0).
 const bulletTerrain = (x, y, z) => terrainCollision(x, y, z, 0);
@@ -160,18 +175,35 @@ function animate() {
   if (fire2.bullets.length) bullets.push(...fire2.bullets);
 
   const targets = [
-    { owner: 0, x: plane1.x, y: plane1.y, z: plane1.z },
-    { owner: 1, x: plane2.x, y: plane2.y, z: plane2.z },
+    { owner: 0, x: plane1.x, y: plane1.y, z: plane1.z, alive: true },
+    { owner: 1, x: plane2.x, y: plane2.y, z: plane2.z, alive: true },
   ];
   const stepped = stepBullets(bullets, dt, targets, bulletTerrain);
   bullets = stepped.bullets;
   // hits는 M8 combat에서 HP 적용 — 지금은 무시(필요 시 디버그 로그).
   // if (stepped.hits.length) console.log('hit', stepped.hits);
 
+  // ── 유도미사일: 락온(stepLock) → 발사 시 공용 풀 합류 → 유도·명중·소멸(stepMissiles) ──
+  //   각 플레이어의 target은 상대 기체. missile 엣지(p*.missile)를 tryLock으로 전달.
+  const lock1 = stepLock(launcher1, { tryLock: p1.missile, shooter: { ...plane1, owner: 0 }, target: targets[1] }, dt);
+  launcher1 = lock1.launcher;
+  const lock2 = stepLock(launcher2, { tryLock: p2.missile, shooter: { ...plane2, owner: 1 }, target: targets[0] }, dt);
+  launcher2 = lock2.launcher;
+  if (lock1.fired) missiles.push(lock1.fired);
+  if (lock2.fired) missiles.push(lock2.fired);
+
+  const steppedM = stepMissiles(missiles, dt, targets, flares, bulletTerrain);
+  missiles = steppedM.missiles;
+  // steppedM.hits(damage:50)도 M8 combat에서 HP 적용 — 지금은 무시.
+
   applyPlaneTransform(meshP1, plane1);
   applyPlaneTransform(meshP2, plane2);
-  syncBullets(bulletPool, bullets);   // 탄 트레이서 렌더 동기화
-  hud.update(gun1, gun2);             // 탄약/재장전 표시
+  syncBullets(bulletPool, bullets);       // 탄 트레이서 렌더 동기화
+  syncMissiles(missilePool, missiles);    // 미사일 메시 렌더 동기화
+  hud.update(                             // 탄약/재장전 + 미사일 잔량/락온 표시
+    { gun: gun1, launcher: launcher1 },
+    { gun: gun2, launcher: launcher2 },
+  );
 
   applyChase(cameraL, plane1);   // 좌 = P1
   applyChase(cameraR, plane2);   // 우 = P2

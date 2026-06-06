@@ -12,6 +12,7 @@
 - [m3-terrain.md](design/m3-terrain.md) — 고정 설계맵 지형(heightAt·충돌·단일표면 렌더) 설계.
 - [m4-render.md](design/m4-render.md) — 렌더 결선(추격 카메라·기체 자세·분할 2뷰포트) 설계.
 - [m5-gun.md](design/m5-gun.md) — 기관총(탄창·재장전·탄 명중판정) 설계.
+- [m6-missile.md](design/m6-missile.md) — 유도미사일(락온·유도·플레어회피) 설계.
 
 ## 완료 노트 (done)
 - [m0-scaffold.md](done/m0-scaffold.md) — M0 스캐폴드(Vite+Three+Vitest, splitViewports 분할 렌더), 41 테스트 그린.
@@ -20,6 +21,7 @@
 - [m4-render.md](done/m4-render.md) — M4 렌더 결선(추격 카메라·기체 자세·2P 조종)+조향 뱅크 수정, chaseCamera 테스트 19(전체 141 그린).
 - [m3-terrain.md](done/m3-terrain.md) — M3 고정 지형(섬·산·다리, 단일표면 바다 z-fighting 해소), terrain 테스트 31(전체 172 그린).
 - [m5-gun.md](done/m5-gun.md) — M5 기관총(탄 트레이서·재장전·탄약 HUD), gun 테스트 35(전체 207 그린).
+- [m6-missile.md](done/m6-missile.md) — M6 유도미사일(락온 2s·유도·플레어회피 준비), missile 테스트 51(전체 258 그린).
 
 ## 진행 현황 (마일스톤)
 | # | 마일스톤 | 상태 | 문서 |
@@ -31,7 +33,7 @@
 | M3 | terrain.js 고정맵(heightAt/충돌질의) + 섬·산·다리·바다 렌더 | ✅ 완료 | [done/m3-terrain.md](done/m3-terrain.md) |
 | M4 | render(씬·분할 2추격카메라·기체 메시·스카이/바다) | ✅ 완료 | [done/m4-render.md](done/m4-render.md) |
 | M5 | weapons/gun.js 기관총(탄·재장전·데미지) + 테스트 | ✅ 완료 | [done/m5-gun.md](done/m5-gun.md) |
-| M6 | weapons/missile.js 유도미사일(락온·유도·데미지·플레어회피) + 테스트 | ⬜ 대기 | — |
+| M6 | weapons/missile.js 유도미사일(락온·유도·데미지·플레어회피) + 테스트 | ✅ 완료 | [done/m6-missile.md](done/m6-missile.md) |
 | M7 | weapons/flare.js 플레어(전개·디코이) + 테스트 | ⬜ 대기 | — |
 | M8 | combat.js 체력/사망/충돌(즉사·승패) + 테스트 | ⬜ 대기 | — |
 | M9 | 분할 HUD(체력·탄약·미사일/플레어·락온·경계경고) | ⬜ 대기 | — |
