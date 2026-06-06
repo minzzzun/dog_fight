@@ -11,8 +11,12 @@ import { splitViewports } from './render/viewport.js';
 import { buildPlane, applyPlaneTransform } from './render/planeMesh.js';
 import { chaseCameraPose } from './render/chaseCamera.js';
 import { buildTerrain } from './render/terrainMesh.js';
+import { createBulletPool, syncBullets } from './render/bulletMesh.js';
+import { createHud } from './render/hud.js';
 import { createPlane, stepFlight } from './flight.js';
 import { createInput, onKeyDown, onKeyUp, readInputs } from './input.js';
+import { createGun, stepGun, stepBullets } from './weapons/gun.js';
+import { terrainCollision } from './terrain.js';
 
 // ══════════════════════════════════════════════════════════════
 // 상수
@@ -66,6 +70,20 @@ const meshP1 = buildPlane(0x2266ff);  // P1 파랑
 const meshP2 = buildPlane(0xff3322);  // P2 빨강
 scene.add(meshP1);
 scene.add(meshP2);
+
+// ══════════════════════════════════════════════════════════════
+// 기관총 (M5) — 플레이어별 총기 상태 + 공용 탄 풀(배열·렌더 인스턴스)
+//   gun1/gun2: 순수 상태기계(stepGun). bullets: owner로 소속 구분하는 공용 배열.
+//   명중당 HP 차감은 M8 combat 범위 — 여기선 발사·탄·명중판정·트레이서까지.
+// ══════════════════════════════════════════════════════════════
+let gun1 = createGun();
+let gun2 = createGun();
+let bullets = [];
+const bulletPool = createBulletPool(scene);
+const hud = createHud();   // 분할 HUD(탄약/재장전; M9에서 확장)
+
+// 지형/수면 충돌로 탄 소멸시키는 래퍼(탄은 점 → margin 0).
+const bulletTerrain = (x, y, z) => terrainCollision(x, y, z, 0);
 
 // ══════════════════════════════════════════════════════════════
 // 입력 결선 (DOM ↔ input.js)
@@ -133,8 +151,27 @@ function animate() {
   plane1 = stepFlight(plane1, p1, dt);
   plane2 = stepFlight(plane2, p2, dt);
 
+  // ── 기관총: 발사(stepGun) → 공용 풀에 합류 → 이동·명중·소멸(stepBullets) ──
+  const fire1 = stepGun(gun1, { firing: p1.gun, shooter: { ...plane1, owner: 0 } }, dt);
+  gun1 = fire1.gun;
+  const fire2 = stepGun(gun2, { firing: p2.gun, shooter: { ...plane2, owner: 1 } }, dt);
+  gun2 = fire2.gun;
+  if (fire1.bullets.length) bullets.push(...fire1.bullets);
+  if (fire2.bullets.length) bullets.push(...fire2.bullets);
+
+  const targets = [
+    { owner: 0, x: plane1.x, y: plane1.y, z: plane1.z },
+    { owner: 1, x: plane2.x, y: plane2.y, z: plane2.z },
+  ];
+  const stepped = stepBullets(bullets, dt, targets, bulletTerrain);
+  bullets = stepped.bullets;
+  // hits는 M8 combat에서 HP 적용 — 지금은 무시(필요 시 디버그 로그).
+  // if (stepped.hits.length) console.log('hit', stepped.hits);
+
   applyPlaneTransform(meshP1, plane1);
   applyPlaneTransform(meshP2, plane2);
+  syncBullets(bulletPool, bullets);   // 탄 트레이서 렌더 동기화
+  hud.update(gun1, gun2);             // 탄약/재장전 표시
 
   applyChase(cameraL, plane1);   // 좌 = P1
   applyChase(cameraR, plane2);   // 우 = P2
