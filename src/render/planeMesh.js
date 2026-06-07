@@ -30,7 +30,28 @@ export function buildPlane(color) {
   wing.position.z = 0.5;
   group.add(wing);
 
+  // 애프터버너 불꽃: 꼬리(+Z 뒤)에 붙는 발광 콘. 부스터 시에만 표시(setAfterburner).
+  const abGeo = new THREE.ConeGeometry(0.8, 4, 12);
+  const abMat = new THREE.MeshBasicMaterial({ color: 0xff8a1e, transparent: true, opacity: 0.9, fog: false });
+  const ab = new THREE.Mesh(abGeo, abMat);
+  ab.name = 'afterburner';
+  ab.rotation.x = Math.PI / 2;   // 콘 꼭지가 +Z(뒤)로 향하게(불꽃이 뒤로 뻗음)
+  ab.position.z = 3.2;           // 동체 꼬리 뒤
+  ab.visible = false;
+  group.add(ab);
+
   return group;
+}
+
+// 부스터 불꽃 on/off + 살짝 깜빡임(시간 위상으로 길이 변동).
+export function setAfterburner(mesh, on, phase = 0) {
+  const ab = mesh.getObjectByName('afterburner');
+  if (!ab) return;
+  ab.visible = !!on;
+  if (on) {
+    const s = 1 + 0.3 * Math.sin(phase * 30);  // 길이 깜빡
+    ab.scale.set(1, s, 1);
+  }
 }
 
 // 비행 상태를 메시 위치·회전에 반영.

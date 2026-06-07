@@ -11,12 +11,12 @@
 
 // 속도(m/s)
 export const BASE_SPEED  = 120;   // 기본 순항
-export const BOOST_SPEED = 180;   // 부스터 목표
-export const BRAKE_SPEED = 70;    // 감속 목표
-export const MIN_SPEED   = 70;    // 하한(스톨 없음)
-export const MAX_SPEED   = 180;   // 상한
-export const ACCEL       = 90;    // 가속률(m/s²)
-export const DECEL       = 120;   // 감속률(m/s²)
+export const BOOST_SPEED = 210;   // 부스터 목표(가속)
+export const BRAKE_SPEED = 8;     // 감속 목표 — 오래 누르면 엔진오프처럼 거의 정지(코브라 가능)
+export const MIN_SPEED   = 8;     // 하한(거의 정지까지 허용 → 고받음각 코브라)
+export const MAX_SPEED   = 210;   // 상한
+export const ACCEL       = 55;    // 가속률(m/s²) — 엔진 스풀업처럼 점진적
+export const DECEL       = 80;    // 감속률(m/s²) — 브레이크로 점진 감속
 
 // 자세 레이트(rad/s)
 export const PITCH_RATE  = 1.2;   // 피치 입력 최대 시 각속도
@@ -28,7 +28,7 @@ export const ROLL_LEVEL_RATE  = 2.0; // 롤 0 복원 각속도
 export const PITCH_LEVEL_RATE = 0.8; // 피치 0 복원 각속도(완만)
 
 // 자세 한계(짐벌락 회피)
-export const PITCH_LIMIT = 1.4;   // ≈ ±80°
+export const PITCH_LIMIT = 2.0;   // ≈ ±115° — 수직 넘어 코브라(기수 뒤로 젖힘) 허용
 export const ROLL_LIMIT  = 1.4;   // 시각적 뱅크 한계
 
 // 월드 경계

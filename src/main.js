@@ -8,7 +8,7 @@
 // 무기/지형(섬·산)/HUD는 이후 마일스톤.
 import * as THREE from 'three';
 import { splitViewports } from './render/viewport.js';
-import { buildPlane, applyPlaneTransform } from './render/planeMesh.js';
+import { buildPlane, applyPlaneTransform, setAfterburner } from './render/planeMesh.js';
 import { chaseCameraPose } from './render/chaseCamera.js';
 import { buildTerrain } from './render/terrainMesh.js';
 import { createBulletPool, syncBullets } from './render/bulletMesh.js';
@@ -124,6 +124,7 @@ const hud = createHud();   // 분할 HUD(탄약/재장전 + 미사일 잔량/락
 let combat = createCombat();
 let resultShown = false;   // 결과 오버레이 1회 표시 가드
 let prevAlive = [true, true];  // 사망 전이 감지(폭발용)
+let abPhase = 0;               // 애프터버너 불꽃 깜빡임 위상
 
 // 폭발 이펙트 풀 + 록온 사각 표시
 const explosionPool = createExplosionPool(scene);
@@ -229,6 +230,11 @@ function animate() {
 
     if (p0Alive) plane1 = stepFlight(plane1, p1, dt);
     if (p1Alive) plane2 = stepFlight(plane2, p2, dt);
+
+    // 가속 이펙트(애프터버너) — 부스터 입력 시 꼬리 불꽃.
+    abPhase += dt;
+    setAfterburner(meshP1, p0Alive && p1.boost, abPhase);
+    setAfterburner(meshP2, p1Alive && p2.boost, abPhase);
 
     // ── 기관총: 발사(stepGun) → 공용 풀에 합류 → 이동·명중·소멸(stepBullets) ──
     const fire1 = stepGun(gun1, { firing: p0Alive && p1.gun, shooter: { ...plane1, owner: 0 } }, dt);
