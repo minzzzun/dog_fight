@@ -15,6 +15,8 @@ import { createBulletPool, syncBullets } from './render/bulletMesh.js';
 import { createMissilePool, syncMissiles } from './render/missileMesh.js';
 import { createFlarePool, syncFlares } from './render/flareMesh.js';
 import { createMarker } from './render/marker.js';
+import { createExplosionPool, spawnExplosion, stepExplosions } from './render/explosion.js';
+import { createLockReticle } from './render/lockReticle.js';
 import { createHud } from './render/hud.js';
 import { targetIndicator } from './radar.js';
 import { createPlane, stepFlight } from './flight.js';
@@ -121,6 +123,11 @@ const hud = createHud();   // 분할 HUD(탄약/재장전 + 미사일 잔량/락
 // ══════════════════════════════════════════════════════════════
 let combat = createCombat();
 let resultShown = false;   // 결과 오버레이 1회 표시 가드
+let prevAlive = [true, true];  // 사망 전이 감지(폭발용)
+
+// 폭발 이펙트 풀 + 록온 사각 표시
+const explosionPool = createExplosionPool(scene);
+const lockReticle = createLockReticle();
 
 // 결과 오버레이(최소) — DOM 풀스크린. winner: 0(P1승)/1(P2승)/'draw'(무승부).
 //   재대결 버튼 동작은 M11. 지금은 새로고침 안내로 충분.
@@ -276,6 +283,10 @@ function animate() {
 
     // ── 전투(M8): 기관총(-1)·미사일(-50) hits 합쳐 HP 적용 + 지형/수면 충돌 즉사 + 승패 ──
     const hits = [...stepped.hits, ...steppedM.hits];
+    // 미사일 명중 위치에 폭발 이펙트
+    for (const h of steppedM.hits) {
+      if (h.position) spawnExplosion(explosionPool, h.position.x, h.position.y, h.position.z, false);
+    }
     combat = stepCombat(combat, {
       hits,
       planes: [plane1, plane2],
@@ -283,12 +294,23 @@ function animate() {
       margin: CRASH_MARGIN,
     });
 
+    // 사망 전이(격추/추락) → 기체 위치에 큰 폭발
+    const planes = [plane1, plane2];
+    for (let i = 0; i < 2; i++) {
+      if (prevAlive[i] && !combat.players[i].alive) {
+        spawnExplosion(explosionPool, planes[i].x, planes[i].y, planes[i].z, true);
+      }
+      prevAlive[i] = combat.players[i].alive;
+    }
+
     // 전투 종료 → 결과 오버레이 1회 표시.
     if (combat.state === 'over' && !resultShown) {
       resultShown = true;
       showResult(combat.winner);
     }
   }
+
+  stepExplosions(explosionPool, dt);   // 폭발 이펙트 갱신(종료 후에도 잔여 재생)
 
   applyPlaneTransform(meshP1, plane1);
   applyPlaneTransform(meshP2, plane2);
@@ -307,6 +329,15 @@ function animate() {
 
   applyChase(cameraL, plane1);   // 좌 = P1
   applyChase(cameraR, plane2);   // 우 = P2
+
+  // 록온 사각 — 각 플레이어 카메라로 상대 위치 투영해 박스 표시(락온 중/완료)
+  cameraL.updateMatrixWorld();
+  cameraR.updateMatrixWorld();
+  lockReticle.update(
+    { camera: cameraL, target: plane2, launcher: launcher1 },
+    { camera: cameraR, target: plane1, launcher: launcher2 },
+    window.innerWidth, window.innerHeight,
+  );
 
   renderViews();
 }

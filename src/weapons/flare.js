@@ -10,7 +10,7 @@ import { FLARE_DECOY_RADIUS } from './missile.js';
 // ── 상수 (seed 수치 — 출발점, 튜닝 가능) ──────────────────────────────
 export const FLARE_AMMO     = 3;                  // 플레이어당 보유 플레어 수(시작 3)
 export const FLARE_COOLDOWN = 5;                  // 전개 쿨다운(초) — 연속 전개 방지
-export const FLARE_LIFE     = 3;                  // 디코이 유효 지속(초) — life<=0이면 디코이 무효
+export const FLARE_LIFE     = 6;                  // 디코이 유효 지속(초) — life<=0이면 디코이 무효
 export const FLARE_RADIUS   = FLARE_DECOY_RADIUS; // 디코이 반경(m) — missile과 단일화(=80)
 
 // 전개 직후 뒤/아래로 분리되는 초기 속도(시각/감각용). 0이면 고정 위치.

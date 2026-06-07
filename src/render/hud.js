@@ -81,11 +81,25 @@ function makeArrow(leftPercent) {
   return { wrap, arrow, label };
 }
 
+// 각 절반 화면 중앙 조준점(+) — 기관총 조준 기준. 고정 표시.
+function makeCrosshair(leftPercent) {
+  const el = document.createElement('div');
+  el.style.cssText =
+    'position:fixed;top:50%;left:' + leftPercent + '%;transform:translate(-50%,-50%);' +
+    'color:rgba(255,255,255,0.7);font-family:monospace;font-size:30px;line-height:1;' +
+    'pointer-events:none;z-index:9;text-shadow:0 0 3px rgba(0,0,0,0.9)';
+  el.textContent = '+';
+  document.body.appendChild(el);
+  return el;
+}
+
 export function createHud() {
   const left = makePanel(25);   // 좌측 절반 중앙(하단)
   const right = makePanel(75);  // 우측 절반 중앙(하단)
   const arrowL = makeArrow(25); // 좌측 상단 방향 화살표
   const arrowR = makeArrow(75);
+  makeCrosshair(25);            // 좌/우 조준점(고정)
+  makeCrosshair(75);
 
   function render(panel, state) {
     const { gun, launcher, dispenser, hp } = normalize(state);

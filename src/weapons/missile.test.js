@@ -5,9 +5,19 @@
 // 가정 시그니처 (설계 mds/design/m6-missile.md §3·§4·§5·§7 기준):
 //   상수: MISSILE_AMMO(2), LOCK_TIME(2), LOCK_CONE(≈0.262, 15°),
 //         MIN_RANGE(150), MAX_RANGE(1200), MISSILE_DAMAGE(50),
-//         MISSILE_SPEED(250), MAX_TURN_RATE(2.2), MISSILE_LIFE(8.0),
-//         MISSILE_RANGE(=MISSILE_SPEED*MISSILE_LIFE), HIT_RADIUS(18),
+//         MAX_TURN_RATE(2.2), MISSILE_LIFE(8.0),
+//         MISSILE_RANGE(=MISSILE_MAX_SPEED*MISSILE_LIFE), HIT_RADIUS(18),
 //         MUZZLE_OFFSET(10), FLARE_DECOY_RADIUS(80)
+//
+//   ── 보강: 미사일 가속 모델 ────────────────────────────────────────────
+//   기존 MISSILE_SPEED(고정 250)을 제거하고 가속 모델로 교체:
+//     MISSILE_INIT_SPEED(150) — 발사 직후 초기 속력(비행기 base 120보다 약간 빠름)
+//     MISSILE_MAX_SPEED(420)  — 상한 속력
+//     MISSILE_ACCEL(130)      — 가속도(m/s²)
+//   미사일 객체에 speed 필드 추가. 발사 시 speed=MISSILE_INIT_SPEED, 속도벡터 크기=speed.
+//   stepMissiles 매 스텝: speed = min(MISSILE_MAX_SPEED, speed + MISSILE_ACCEL*dt),
+//     속도벡터 = 유도방향(turnToward) * speed. 방향 유도(선회율 제한)는 그대로,
+//     속력만 점점 증가(상한 MAX에서 고정).
 //   canLock(shooter, target) → bool
 //     shooter = { x,y,z, yaw,pitch,roll, owner }, target = { owner, x,y,z, alive? }
 //   createMissileLauncher() → { ammo, lockTarget, lockTimer, locked }
@@ -25,7 +35,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   MISSILE_AMMO, LOCK_TIME, LOCK_CONE, MIN_RANGE, MAX_RANGE, MISSILE_DAMAGE,
-  MISSILE_SPEED, MAX_TURN_RATE, MISSILE_LIFE, MISSILE_RANGE, HIT_RADIUS,
+  MISSILE_INIT_SPEED, MISSILE_MAX_SPEED, MISSILE_ACCEL,
+  MAX_TURN_RATE, MISSILE_LIFE, MISSILE_RANGE, HIT_RADIUS,
   MUZZLE_OFFSET, FLARE_DECOY_RADIUS,
   createMissileLauncher, canLock, stepLock, stepMissiles,
 } from './missile.js';
@@ -60,10 +71,15 @@ describe('상수 — seed 수치', () => {
   });
 
   it('비행/명중/머즐/디코이 상수', () => {
-    expect(MISSILE_SPEED).toBe(250);
+    // 보강: 가속 모델 — 고정 MISSILE_SPEED 제거, INIT/MAX/ACCEL로 교체
+    expect(MISSILE_INIT_SPEED).toBe(150); // 발사 직후 초기 속력(비행기 base 120보다 약간 빠름)
+    expect(MISSILE_MAX_SPEED).toBe(420);  // 상한 속력
+    expect(MISSILE_ACCEL).toBe(130);      // 가속도(m/s²)
+    expect(MISSILE_INIT_SPEED).toBeLessThan(MISSILE_MAX_SPEED); // 초기 < 상한
     expect(MAX_TURN_RATE).toBeCloseTo(2.2, 5);
     expect(MISSILE_LIFE).toBeCloseTo(8.0, 5);
-    expect(MISSILE_RANGE).toBeCloseTo(MISSILE_SPEED * MISSILE_LIFE, 3);
+    // 파생 사거리 참고값은 상한 속력 기준
+    expect(MISSILE_RANGE).toBeCloseTo(MISSILE_MAX_SPEED * MISSILE_LIFE, 3);
     expect(HIT_RADIUS).toBe(18);
     expect(MUZZLE_OFFSET).toBe(10);
     expect(FLARE_DECOY_RADIUS).toBe(80);
@@ -219,15 +235,17 @@ describe('stepLock — 발사(수동) · 2발 제한', () => {
     expect(r.launcher.lockTimer).toBe(0);
   });
 
-  it('발사 미사일: forward 방향 속도(크기≈MISSILE_SPEED), owner·target·life·decoyed 부여', () => {
+  it('발사 미사일: forward 방향 초기 속도(크기≈MISSILE_INIT_SPEED), speed=INIT, owner·target·life·decoyed 부여', () => {
     const sh = shooter({ owner: 0 });
     const r = stepLock(lockedLauncher(), ctx({ tryLock: true, shooter: sh, target: target({ owner: 1, z: -600 }) }), 0.016);
     const m = r.fired;
     const f = forwardOf(sh);
-    expect(m.vx).toBeCloseTo(f.x * MISSILE_SPEED, 2);
-    expect(m.vy).toBeCloseTo(f.y * MISSILE_SPEED, 2);
-    expect(m.vz).toBeCloseTo(f.z * MISSILE_SPEED, 2);
-    expect(len({ x: m.vx, y: m.vy, z: m.vz })).toBeCloseTo(MISSILE_SPEED, 2);
+    // 보강: 발사 직후 속력 = MISSILE_INIT_SPEED(이후 가속)
+    expect(m.vx).toBeCloseTo(f.x * MISSILE_INIT_SPEED, 2);
+    expect(m.vy).toBeCloseTo(f.y * MISSILE_INIT_SPEED, 2);
+    expect(m.vz).toBeCloseTo(f.z * MISSILE_INIT_SPEED, 2);
+    expect(len({ x: m.vx, y: m.vy, z: m.vz })).toBeCloseTo(MISSILE_INIT_SPEED, 2);
+    expect(m.speed).toBeCloseTo(MISSILE_INIT_SPEED, 5); // speed 필드 = INIT
     expect(m.owner).toBe(0);
     expect(m.target).toBe(1);
     expect(m.life).toBeCloseTo(MISSILE_LIFE, 5);
@@ -275,8 +293,10 @@ describe('stepLock — 발사(수동) · 2발 제한', () => {
 // ─────────────────────────────────────────────────────────────────────
 describe('stepMissiles — 유도(선회율 제한)', () => {
   // +z(뒤쪽)로 날아가는 미사일. 타깃은 측면/반대편에 둬 큰 선회 요구.
+  // 보강: 속도크기 = speed(=MISSILE_INIT_SPEED), speed 필드 보유.
   const missile = (o = {}) => ({
-    x: 0, y: 300, z: 0, vx: 0, vy: 0, vz: MISSILE_SPEED, target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false, ...o,
+    x: 0, y: 300, z: 0, vx: 0, vy: 0, vz: MISSILE_INIT_SPEED, speed: MISSILE_INIT_SPEED,
+    target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false, ...o,
   });
 
   it('1스텝 속도방향 각변화 ≤ MAX_TURN_RATE*dt (즉시 못 꺾음)', () => {
@@ -309,27 +329,53 @@ describe('stepMissiles — 유도(선회율 제한)', () => {
     expect(prevAngle).toBeLessThan(0.5); // 충분히 정렬
   });
 
-  it('속력은 항상 MISSILE_SPEED로 유지(방향만 회전)', () => {
+  it('속력 가속: 한 스텝 후 speed 증가(가속), 속도벡터 크기 = speed', () => {
     const dt = 0.05;
     const targets = [{ owner: 1, x: 500, y: 300, z: -500 }];
-    let m = { x: 0, y: 300, z: 0, vx: 0, vy: 0, vz: MISSILE_SPEED, target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false };
-    for (let i = 0; i < 5; i++) {
+    const m0 = missile();
+    const r = stepMissiles([m0], dt, targets, []);
+    const m1 = r.missiles[0];
+    // 보강: speed = min(MAX, init + ACCEL*dt) — 한 스텝 만에 증가
+    expect(m1.speed).toBeCloseTo(MISSILE_INIT_SPEED + MISSILE_ACCEL * dt, 4);
+    expect(m1.speed).toBeGreaterThan(m0.speed);
+    // 속도벡터 크기 = speed(방향만 유도로 회전)
+    expect(len({ x: m1.vx, y: m1.vy, z: m1.vz })).toBeCloseTo(m1.speed, 3);
+  });
+
+  it('속력 단조 증가 후 MISSILE_MAX_SPEED에 수렴·상한 고정', () => {
+    const dt = 0.05;
+    // 표적을 도달 불가하게 멀리(가속만 검증 — 명중 소멸 회피)
+    const targets = [{ owner: 1, x: 0, y: 300, z: -50000 }];
+    let m = missile();
+    let prev = m.speed;
+    for (let i = 0; i < 60; i++) {
       m = stepMissiles([m], dt, targets, []).missiles[0];
-      expect(len({ x: m.vx, y: m.vy, z: m.vz })).toBeCloseTo(MISSILE_SPEED, 1);
+      // 단조 비감소(가속), 상한 초과 없음
+      expect(m.speed).toBeGreaterThanOrEqual(prev - 1e-9);
+      expect(m.speed).toBeLessThanOrEqual(MISSILE_MAX_SPEED + 1e-9);
+      // 속도벡터 크기 = speed
+      expect(len({ x: m.vx, y: m.vy, z: m.vz })).toBeCloseTo(m.speed, 2);
+      prev = m.speed;
     }
+    // 충분한 스텝 후 상한 도달
+    expect(m.speed).toBeCloseTo(MISSILE_MAX_SPEED, 5);
+    // 상한 도달 후 추가 스텝에도 상한 고정
+    m = stepMissiles([m], dt, targets, []).missiles[0];
+    expect(m.speed).toBeCloseTo(MISSILE_MAX_SPEED, 5);
   });
 });
 
 // ─────────────────────────────────────────────────────────────────────
 describe('stepMissiles — 명중 · 수명 · 지형', () => {
-  // -z로 진행하는 미사일(타깃을 진행선상에 둠)
+  // -z로 진행하는 미사일(타깃을 진행선상에 둠). 보강: 초기 속력 = MISSILE_INIT_SPEED, speed 필드 보유.
   const missile = (o = {}) => ({
-    x: 0, y: 300, z: 0, vx: 0, vy: 0, vz: -MISSILE_SPEED, target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false, ...o,
+    x: 0, y: 300, z: 0, vx: 0, vy: 0, vz: -MISSILE_INIT_SPEED, speed: MISSILE_INIT_SPEED,
+    target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false, ...o,
   });
 
   it('타깃 HIT_RADIUS 이내 → hit 1건, damage=50, target 일치, 미사일 소멸', () => {
-    const dt = 0.01; // 이동량 2.5m < HIT_RADIUS(18)
-    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_SPEED * dt };
+    const dt = 0.01; // 이동량 1.5m < HIT_RADIUS(18)
+    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_INIT_SPEED * dt };
     const r = stepMissiles([missile()], dt, [tgt], []);
     expect(r.hits.length).toBe(1);
     expect(r.hits[0].damage).toBe(MISSILE_DAMAGE);
@@ -341,7 +387,7 @@ describe('stepMissiles — 명중 · 수명 · 지형', () => {
 
   it('타깃이 HIT_RADIUS보다 멀면 hit 없음·미사일 생존', () => {
     const dt = 0.01;
-    const tgt = { owner: 1, x: HIT_RADIUS + 30, y: 300, z: -MISSILE_SPEED * dt };
+    const tgt = { owner: 1, x: HIT_RADIUS + 30, y: 300, z: -MISSILE_INIT_SPEED * dt };
     const r = stepMissiles([missile()], dt, [tgt], []);
     expect(r.hits.length).toBe(0);
     expect(r.missiles.length).toBe(1);
@@ -349,14 +395,14 @@ describe('stepMissiles — 명중 · 수명 · 지형', () => {
 
   it('자기 자신(owner===target.owner) 제외 → hit 없음', () => {
     const dt = 0.01;
-    const tgt = { owner: 0, x: 0, y: 300, z: -MISSILE_SPEED * dt };
+    const tgt = { owner: 0, x: 0, y: 300, z: -MISSILE_INIT_SPEED * dt };
     const r = stepMissiles([missile({ owner: 0 })], dt, [tgt], []);
     expect(r.hits.length).toBe(0);
   });
 
   it('alive===false 기체는 명중 무시', () => {
     const dt = 0.01;
-    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_SPEED * dt, alive: false };
+    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_INIT_SPEED * dt, alive: false };
     const r = stepMissiles([missile()], dt, [tgt], []);
     expect(r.hits.length).toBe(0);
   });
@@ -386,8 +432,8 @@ describe('stepMissiles — 명중 · 수명 · 지형', () => {
   it('실제 terrainCollision 래퍼: 산 내부 미사일 소멸, 빈 하늘 미사일 생존', async () => {
     const { terrainCollision } = await import('../terrain.js');
     const wrap = (x, y, z) => terrainCollision(x, y, z, 0);
-    const inside = { x: 620, y: 5, z: 720, vx: 0, vy: 0, vz: 0, target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false };
-    const sky = { x: 0, y: 1200, z: 0, vx: 0, vy: 0, vz: 0, target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false };
+    const inside = { x: 620, y: 5, z: 720, vx: 0, vy: 0, vz: 0, speed: MISSILE_INIT_SPEED, target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false };
+    const sky = { x: 0, y: 1200, z: 0, vx: 0, vy: 0, vz: 0, speed: MISSILE_INIT_SPEED, target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false };
     const r = stepMissiles([inside, sky], 0.001, [], [], wrap);
     expect(r.missiles.length).toBe(1);
     expect(r.missiles[0].y).toBeCloseTo(1200, 1); // 살아남은 건 sky
@@ -397,13 +443,15 @@ describe('stepMissiles — 명중 · 수명 · 지형', () => {
 // ─────────────────────────────────────────────────────────────────────
 describe('stepMissiles — 플레어 디코이 회피', () => {
   // 미사일이 -z로 진행, 타깃은 진행선상. flare를 미사일 근처에 둬 디코이 유발.
+  // 보강: 초기 속력 = MISSILE_INIT_SPEED, speed 필드 보유.
   const missile = (o = {}) => ({
-    x: 0, y: 300, z: 0, vx: 0, vy: 0, vz: -MISSILE_SPEED, target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false, ...o,
+    x: 0, y: 300, z: 0, vx: 0, vy: 0, vz: -MISSILE_INIT_SPEED, speed: MISSILE_INIT_SPEED,
+    target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false, ...o,
   });
 
   it('활성 flare가 디코이 반경 내 → decoyed=true, 기체 hit 발생 안 함', () => {
     const dt = 0.01;
-    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_SPEED * dt }; // 평소라면 명중할 위치
+    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_INIT_SPEED * dt }; // 평소라면 명중할 위치
     const flare = { x: 10, y: 300, z: 0, radius: 30, life: 2 };     // 미사일과 매우 가까움(<FLARE_DECOY_RADIUS)
     const r = stepMissiles([missile()], dt, [tgt], [flare]);
     expect(r.hits.length).toBe(0);            // 기체 명중 안 됨
@@ -426,7 +474,7 @@ describe('stepMissiles — 플레어 디코이 회피', () => {
 
   it('flare가 디코이 반경 밖이면 무효 → 정상 명중', () => {
     const dt = 0.01;
-    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_SPEED * dt };
+    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_INIT_SPEED * dt };
     const flare = { x: FLARE_DECOY_RADIUS + 200, y: 300, z: 0, radius: 30, life: 2 }; // 멀다
     const r = stepMissiles([missile()], dt, [tgt], [flare]);
     expect(r.hits.length).toBe(1);
@@ -435,7 +483,7 @@ describe('stepMissiles — 플레어 디코이 회피', () => {
 
   it('만료 flare(life<=0)는 디코이 트리거 안 됨 → 정상 명중', () => {
     const dt = 0.01;
-    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_SPEED * dt };
+    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_INIT_SPEED * dt };
     const flare = { x: 5, y: 300, z: 0, radius: 30, life: 0 }; // 만료
     const r = stepMissiles([missile()], dt, [tgt], [flare]);
     expect(r.hits.length).toBe(1);
@@ -443,14 +491,14 @@ describe('stepMissiles — 플레어 디코이 회피', () => {
 
   it('flares 빈 배열 → 디코이 없음, 정상 명중', () => {
     const dt = 0.01;
-    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_SPEED * dt };
+    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_INIT_SPEED * dt };
     const r = stepMissiles([missile()], dt, [tgt], []);
     expect(r.hits.length).toBe(1);
   });
 
   it('결정론: 동일 (missiles, flares) 두 번 → decoyed 결과 동일', () => {
     const dt = 0.01;
-    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_SPEED * dt };
+    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_INIT_SPEED * dt };
     const flare = { x: 10, y: 300, z: 0, radius: 30, life: 2 };
     const a = stepMissiles([missile()], dt, [tgt], [flare]);
     const b = stepMissiles([missile()], dt, [tgt], [flare]);
@@ -460,8 +508,10 @@ describe('stepMissiles — 플레어 디코이 회피', () => {
 
 // ─────────────────────────────────────────────────────────────────────
 describe('결정론 · 불변', () => {
+  // 보강: 초기 속력 = MISSILE_INIT_SPEED, speed 필드 보유.
   const missile = (o = {}) => ({
-    x: 0, y: 300, z: 0, vx: 0, vy: 0, vz: -MISSILE_SPEED, target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false, ...o,
+    x: 0, y: 300, z: 0, vx: 0, vy: 0, vz: -MISSILE_INIT_SPEED, speed: MISSILE_INIT_SPEED,
+    target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false, ...o,
   });
 
   it('stepLock: 동일 입력 두 번 → 깊은 동등', () => {

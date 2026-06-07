@@ -18,11 +18,13 @@ export const MIN_RANGE      = 150;          // 최소 사거리(m) — 이보다
 export const MAX_RANGE      = 1200;         // 최대 사거리(m) — 이보다 멀면 락/발사 불가
 export const MISSILE_DAMAGE = 50;           // 1발 명중당 데미지
 
-// 미사일 비행
-export const MISSILE_SPEED  = 250;          // 미사일 속도(m/s) — 기체(~120~180)보다 빠름
+// 미사일 비행 — 가속 모델: 발사 직후 기체보다 살짝 빠른 속도에서 시작해 점점 가속.
+export const MISSILE_INIT_SPEED = 150;      // 발사 직후 속도(m/s) — 기체 base(120)보다 약간 빠름
+export const MISSILE_MAX_SPEED  = 420;      // 최고 속도(m/s)
+export const MISSILE_ACCEL      = 130;      // 가속도(m/s²)
 export const MAX_TURN_RATE  = 2.2;          // 유도 최대 선회율(rad/s) — 즉시 못 꺾음(회피 여지)
 export const MISSILE_LIFE   = 8.0;          // 수명(초)
-export const MISSILE_RANGE  = MISSILE_SPEED * MISSILE_LIFE; // 파생 참고값
+export const MISSILE_RANGE  = MISSILE_MAX_SPEED * MISSILE_LIFE; // 파생 참고값
 
 // 명중 판정
 export const HIT_RADIUS     = 18;           // 기체 명중 반경(m) — gun(12)보다 관대(폭발 반경 근사)
@@ -138,9 +140,10 @@ function spawnMissile(shooter, targetOwner) {
     x: shooter.x + f.x * MUZZLE_OFFSET,
     y: shooter.y + f.y * MUZZLE_OFFSET,
     z: shooter.z + f.z * MUZZLE_OFFSET,
-    vx: f.x * MISSILE_SPEED,
-    vy: f.y * MISSILE_SPEED,
-    vz: f.z * MISSILE_SPEED,
+    vx: f.x * MISSILE_INIT_SPEED,
+    vy: f.y * MISSILE_INIT_SPEED,
+    vz: f.z * MISSILE_INIT_SPEED,
+    speed: MISSILE_INIT_SPEED,      // 가속 모델: 초기속도에서 점점 증가
     target: targetOwner,
     life: MISSILE_LIFE,
     owner: shooter.owner,
@@ -235,6 +238,9 @@ export function stepMissiles(missiles, dt, targets, flares, terrain) {
     let decoyed = m.decoyed;
     if (aim && aim._decoy) decoyed = true;  // 디코이 전환
 
+    // 가속: 속력을 MISSILE_MAX_SPEED 까지 점점 증가(발사 직후 INIT → 점점 빨라짐)
+    const speed = Math.min(MISSILE_MAX_SPEED, (m.speed ?? MISSILE_INIT_SPEED) + MISSILE_ACCEL * dt);
+
     if (aim) {
       // (b) 선회율 제한 유도: 현재 속도방향을 목표방향으로 MAX_TURN_RATE*dt 만큼만 회전
       const steered = turnToward(
@@ -242,9 +248,13 @@ export function stepMissiles(missiles, dt, targets, flares, terrain) {
         { x: aim.x - m.x, y: aim.y - m.y, z: aim.z - m.z },
         MAX_TURN_RATE * dt,
       );
-      vx = steered.x * MISSILE_SPEED;   // 속력은 일정(MISSILE_SPEED), 방향만 갱신
-      vy = steered.y * MISSILE_SPEED;
-      vz = steered.z * MISSILE_SPEED;
+      vx = steered.x * speed;   // 방향=유도, 크기=가속된 speed
+      vy = steered.y * speed;
+      vz = steered.z * speed;
+    } else {
+      // 목표 없음: 방향 유지, 크기만 가속 반영
+      const len = Math.hypot(vx, vy, vz) || 1;
+      vx = (vx / len) * speed; vy = (vy / len) * speed; vz = (vz / len) * speed;
     }
 
     // (c) 이동 + 수명 차감
@@ -268,7 +278,7 @@ export function stepMissiles(missiles, dt, targets, flares, terrain) {
     }
 
     // (g) 생존 → 갱신 미사일(불변: 새 객체)
-    alive.push({ x: nx, y: ny, z: nz, vx, vy, vz, target: m.target, life, owner: m.owner, decoyed });
+    alive.push({ x: nx, y: ny, z: nz, vx, vy, vz, speed, target: m.target, life, owner: m.owner, decoyed });
   }
 
   return { missiles: alive, hits };

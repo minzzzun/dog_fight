@@ -3,7 +3,7 @@
 // TDD RED 단계: 구현(src/weapons/flare.js)은 아직 없다. 이 테스트만 먼저 작성한다.
 //
 // 가정 시그니처 (설계 mds/design/m7-flare.md §3·§4·§5·§7 기준):
-//   상수: FLARE_AMMO(3), FLARE_COOLDOWN(5), FLARE_LIFE(3),
+//   상수: FLARE_AMMO(3), FLARE_COOLDOWN(5), FLARE_LIFE(6),  ← 보강: 수명 3→6초로 연장
 //         FLARE_RADIUS(= missile.FLARE_DECOY_RADIUS = 80)
 //   createFlareDispenser() → { ammo, cooldown }
 //   stepFlareDispenser(state, ctx, dt) → { state(불변·새 객체), flare(생성 flare 또는 null) }
@@ -20,7 +20,7 @@ import {
   FLARE_AMMO, FLARE_COOLDOWN, FLARE_LIFE, FLARE_RADIUS,
   createFlareDispenser, stepFlareDispenser, stepFlares,
 } from './flare.js';
-import { FLARE_DECOY_RADIUS, stepMissiles, MISSILE_SPEED, MISSILE_LIFE } from './missile.js';
+import { FLARE_DECOY_RADIUS, stepMissiles, MISSILE_INIT_SPEED, MISSILE_LIFE } from './missile.js';
 
 // 기본 전개 컨텍스트(자세 무관 — pos만 사용)
 const ctx = (o = {}) => ({ deploy: false, owner: 0, pos: { x: 0, y: 300, z: 0 }, ...o });
@@ -30,7 +30,7 @@ describe('상수 — seed 수치', () => {
   it('보유/쿨다운/수명 상수', () => {
     expect(FLARE_AMMO).toBe(3);
     expect(FLARE_COOLDOWN).toBe(5);
-    expect(FLARE_LIFE).toBe(3);
+    expect(FLARE_LIFE).toBe(6); // 보강: 디코이 지속 3→6초
   });
 
   it('FLARE_RADIUS는 missile.FLARE_DECOY_RADIUS와 정합(=80)', () => {
@@ -243,8 +243,10 @@ describe('stepFlares — 수명 감소·만료 제거', () => {
 // ─────────────────────────────────────────────────────────────────────
 describe('missile 디코이와 호환 (통합 케이스)', () => {
   // 미사일이 -z로 진행, 타깃은 진행선상(평소라면 명중). flare를 미사일 근처에 둔다.
+  // 보강(missile 가속 모델): 초기 속력 = MISSILE_INIT_SPEED, speed 필드 보유.
   const missile = (o = {}) => ({
-    x: 0, y: 300, z: 0, vx: 0, vy: 0, vz: -MISSILE_SPEED, target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false, ...o,
+    x: 0, y: 300, z: 0, vx: 0, vy: 0, vz: -MISSILE_INIT_SPEED, speed: MISSILE_INIT_SPEED,
+    target: 1, life: MISSILE_LIFE, owner: 0, decoyed: false, ...o,
   });
 
   it('stepFlareDispenser로 만든 flare를 미사일 근처에 두면 디코이 발동 → hits 없음·decoyed=true', () => {
@@ -255,7 +257,7 @@ describe('missile 디코이와 호환 (통합 케이스)', () => {
     const flare = made.flare;
     expect(flare).not.toBeNull();
 
-    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_SPEED * dt }; // 평소라면 명중할 위치
+    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_INIT_SPEED * dt }; // 평소라면 명중할 위치
     const r = stepMissiles([missile()], dt, [tgt], [flare]);
     expect(r.hits.length).toBe(0);            // 기체 명중 안 됨(디코이)
     expect(r.missiles.length).toBe(1);
@@ -280,7 +282,7 @@ describe('missile 디코이와 호환 (통합 케이스)', () => {
     const survivors = stepFlares([expiring], 0.02);
     expect(survivors.length).toBe(0); // 제거됨
 
-    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_SPEED * dt };
+    const tgt = { owner: 1, x: 0, y: 300, z: -MISSILE_INIT_SPEED * dt };
     const r = stepMissiles([missile()], dt, [tgt], survivors); // 디코이 후보 없음
     expect(r.hits.length).toBe(1);            // 정상 명중
     expect(r.missiles.length).toBe(0);
