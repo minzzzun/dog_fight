@@ -24,7 +24,8 @@ import { createInput, onKeyDown, onKeyUp, readInputs } from './input.js';
 import { createGun, stepGun, stepBullets } from './weapons/gun.js';
 import { createMissileLauncher, stepLock, stepMissiles } from './weapons/missile.js';
 import { createFlareDispenser, stepFlareDispenser, stepFlares } from './weapons/flare.js';
-import { forwardOf } from './flight.js';
+import { forwardOf, MAX_SPEED } from './flight.js';
+import { createAudio } from './audio.js';
 import { terrainCollision } from './terrain.js';
 import { createCombat, stepCombat, CRASH_MARGIN } from './combat.js';
 
@@ -162,7 +163,12 @@ const bulletTerrain = (x, y, z) => terrainCollision(x, y, z, 0);
 // ══════════════════════════════════════════════════════════════
 const input = createInput();
 
+// 사운드(M10) — 첫 키 입력(사용자 제스처)에서 AudioContext resume. KeyM 음소거.
+const audio = createAudio({ maxSpeed: MAX_SPEED });
+
 window.addEventListener('keydown', (e) => {
+  audio.resume();                                  // 첫 제스처에 ctx 생성/재개(이후 idempotent)
+  if (e.code === 'Backquote') audio.toggleMute();  // 음소거(` 키) — M은 P2 플레어라 충돌 회피
   if (onKeyDown(input, e.code)) e.preventDefault();
 });
 window.addEventListener('keyup', (e) => {
@@ -243,6 +249,7 @@ function animate() {
     gun2 = fire2.gun;
     if (fire1.bullets.length) bullets.push(...fire1.bullets);
     if (fire2.bullets.length) bullets.push(...fire2.bullets);
+    if (fire1.bullets.length || fire2.bullets.length) audio.gunShot();  // 기관총 효과음
 
     // 죽은 기체는 alive=false → 무기 명중 후보에서 제외(stepBullets/stepMissiles가 무시).
     const targets = [
@@ -260,6 +267,7 @@ function animate() {
     launcher2 = lock2.launcher;
     if (lock1.fired) missiles.push(lock1.fired);
     if (lock2.fired) missiles.push(lock2.fired);
+    if (lock1.fired || lock2.fired) audio.missileFire();  // 미사일 발사 효과음
 
     // ── 플레어: 전개(stepFlareDispenser) → 공용 풀 합류 → 수명관리(stepFlares) ──
     //   flare 키 엣지(p*.flare)를 deploy로 전달. vel은 기수방향×속력(전개 분리감용).
@@ -291,7 +299,7 @@ function animate() {
     const hits = [...stepped.hits, ...steppedM.hits];
     // 미사일 명중 위치에 폭발 이펙트
     for (const h of steppedM.hits) {
-      if (h.position) spawnExplosion(explosionPool, h.position.x, h.position.y, h.position.z, false);
+      if (h.position) { spawnExplosion(explosionPool, h.position.x, h.position.y, h.position.z, false); audio.explosion(false); }
     }
     combat = stepCombat(combat, {
       hits,
@@ -305,6 +313,7 @@ function animate() {
     for (let i = 0; i < 2; i++) {
       if (prevAlive[i] && !combat.players[i].alive) {
         spawnExplosion(explosionPool, planes[i].x, planes[i].y, planes[i].z, true);
+        audio.death();   // 격추/추락 전용 폭발음(묵직한 붐+하강 톤)
       }
       prevAlive[i] = combat.players[i].alive;
     }
@@ -336,6 +345,10 @@ function animate() {
     { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2, hp: combat.players[1].hp, lockedBy: lockedBy1 },
     dt,
   );
+
+  // 사운드: 피락온 경고 beep(누구든 피락온이면) + 엔진 피치(빠른 쪽 기준).
+  audio.lockWarn(lockedBy0.locked || lockedBy0.locking || lockedBy1.locked || lockedBy1.locking);
+  audio.update({ speed: Math.max(plane1.speed, plane2.speed) }, dt);
 
   applyChase(cameraL, plane1);   // 좌 = P1
   applyChase(cameraR, plane2);   // 우 = P2

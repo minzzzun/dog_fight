@@ -27,6 +27,7 @@
 - [m7-flare.md](done/m7-flare.md) — M7 플레어(미사일 디코이·잔량·쿨다운) + 상대 방향 표시기, flare 테스트 24(전체 290 그린).
 - [m8-combat.md](done/m8-combat.md) — M8 전투(체력·충돌 즉사·승패) + 위치 마커/미사일 모양 폴리시, combat 테스트 48(전체 338 그린).
 - [m9-hud.md](done/m9-hud.md) — M9 HUD 폴리시(체력바+정돈) + 무기/플레어 시간재장전·0발락온차단·사거리2000·피락온경고·재장전시간(전체 347 그린).
+- [m10-audio.md](done/m10-audio.md) — M10 절차적 사운드(엔진·기관총·미사일·폭발·격추·피락온 beep·BGM, ` 음소거) + 코브라/가속이펙트, audio 테스트 41(전체 388 그린).
 
 ## 진행 현황 (마일스톤)
 | # | 마일스톤 | 상태 | 문서 |
@@ -42,6 +43,6 @@
 | M7 | weapons/flare.js 플레어(전개·디코이) + 테스트 | ✅ 완료 | [done/m7-flare.md](done/m7-flare.md) |
 | M8 | combat.js 체력/사망/충돌(즉사·승패) + 테스트 | ✅ 완료 | [done/m8-combat.md](done/m8-combat.md) |
 | M9 | 분할 HUD(체력바·탄약·미사일/플레어·락온·피락온경고) | ✅ 완료 | [done/m9-hud.md](done/m9-hud.md) |
-| M10 | 사운드(엔진+효과음+음악) | ⬜ 대기 | — |
+| M10 | 사운드(엔진+효과음+격추+음악) | ✅ 완료 | [done/m10-audio.md](done/m10-audio.md) |
 | M11 | 시작화면(색 선택 중복불가) + 결과창/재대결 | ⬜ 대기 | — |
 | M12 | 마감/통합/ACCEPTANCE 검증 | ⬜ 대기 | — |
