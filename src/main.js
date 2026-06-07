@@ -87,7 +87,7 @@ const shake = [0, 0];        // 카메라 흔들림 세기(피격 시 증가, �
 const hitFlash = [0, 0];     // 히트마커(상대 명중) 잔여 시간
 const boosting = [false, false];
 const HITFLASH_TIME = 0.12, SHAKE_HIT = 1.2, SHAKE_DEATH = 5;
-const BOOST_FOV = 90, FOV_LERP = 4;
+const BOOST_FOV = 90, LOW_FOV = 62, FOV_LERP = 4;
 // 데미지 상태 — 저체력이면 연기 + 기동 둔화
 const LOW_HP = 40, SLUGGISH = 0.4, SMOKE_INTERVAL = 0.06;
 const smokeTimer = [0, 0];
@@ -217,11 +217,10 @@ function applyChase(camera, plane) {
   camera.lookAt(pose.lookAt.x, pose.lookAt.y, pose.lookAt.z);
 }
 
-// 부스터 시 FOV 확대(스피드감). 매 프레임 목표 FOV로 보간.
-function applyFov(camera, boost, dt) {
-  const target = boost ? BOOST_FOV : FOV;
+// FOV 보간 — 목표 FOV로. 부스터=확대, 저체력=축소(터널비전).
+function applyFov(camera, targetFov, dt) {
   const k = Math.min(1, FOV_LERP * dt);
-  camera.fov += (target - camera.fov) * k;
+  camera.fov += (targetFov - camera.fov) * k;
   camera.updateProjectionMatrix();
 }
 
@@ -283,17 +282,20 @@ function animate() {
     const ind2 = targetIndicator(plane2, plane1);
     const lockedBy0 = { locking: launcher2.lockTarget === 0 && launcher2.lockTimer > 0 && !launcher2.locked, locked: launcher2.lockTarget === 0 && launcher2.locked };
     const lockedBy1 = { locking: launcher1.lockTarget === 1 && launcher1.lockTimer > 0 && !launcher1.locked, locked: launcher1.lockTarget === 1 && launcher1.locked };
+    // 저체력 정도(0~1) — FOV 축소·붉은 비네트 강도
+    const dmg0 = Math.max(0, Math.min(1, (LOW_HP - combat.players[0].hp) / LOW_HP));
+    const dmg1 = Math.max(0, Math.min(1, (LOW_HP - combat.players[1].hp) / LOW_HP));
     hud.update(
-      { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1, hp: combat.players[0].hp, lockedBy: lockedBy0, bounds: plane1.warning, speed: plane1.speed, alt: plane1.y, hitMarker: hitFlash[0] > 0 },
-      { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2, hp: combat.players[1].hp, lockedBy: lockedBy1, bounds: plane2.warning, speed: plane2.speed, alt: plane2.y, hitMarker: hitFlash[1] > 0 },
+      { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1, hp: combat.players[0].hp, lockedBy: lockedBy0, bounds: plane1.warning, speed: plane1.speed, alt: plane1.y, hitMarker: hitFlash[0] > 0, damage: dmg0 },
+      { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2, hp: combat.players[1].hp, lockedBy: lockedBy1, bounds: plane2.warning, speed: plane2.speed, alt: plane2.y, hitMarker: hitFlash[1] > 0, damage: dmg1 },
       dt,
     );
     audio.lockWarn(lockedBy0.locked || lockedBy0.locking || lockedBy1.locked || lockedBy1.locking);
     audio.update({ speed: Math.max(plane1.speed, plane2.speed) }, dt);
 
-    // 부스터 시 FOV 확대(스피드감) — 플레이어별 카메라
-    applyFov(cameraL, boosting[0], dt);
-    applyFov(cameraR, boosting[1], dt);
+    // FOV — 저체력=축소(터널비전), 아니면 부스터=확대 / 기본
+    applyFov(cameraL, dmg0 > 0 ? LOW_FOV : (boosting[0] ? BOOST_FOV : FOV), dt);
+    applyFov(cameraR, dmg1 > 0 ? LOW_FOV : (boosting[1] ? BOOST_FOV : FOV), dt);
 
     applyChase(cameraL, plane1);
     applyChase(cameraR, plane2);

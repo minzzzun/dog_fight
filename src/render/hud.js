@@ -120,6 +120,17 @@ function makeBounds(leftPercent) {
   return el;
 }
 
+// ── 저체력 붉은 비네트(각 절반 전체) ─────────────────────────────────
+function makeVignette(isLeft) {
+  const el = document.createElement('div');
+  el.style.cssText =
+    'position:fixed;top:0;height:100vh;width:50vw;left:' + (isLeft ? '0' : '50vw') + ';' +
+    'pointer-events:none;z-index:8;opacity:0;transition:opacity 0.2s;' +
+    'background:radial-gradient(ellipse at center, rgba(255,0,0,0) 45%, rgba(180,0,0,0.85) 100%)';
+  document.body.appendChild(el);
+  return el;
+}
+
 // ── 중앙 조준점 ──────────────────────────────────────────────────────
 function makeCrosshair(leftPercent) {
   const el = document.createElement('div');
@@ -143,6 +154,8 @@ export function createHud() {
   const boundsR = makeBounds(75);
   const crossL = makeCrosshair(25);
   const crossR = makeCrosshair(75);
+  const vigL = makeVignette(true);
+  const vigR = makeVignette(false);
   let blink = 0;
 
   function renderStatus(s, state) {
@@ -201,6 +214,9 @@ export function createHud() {
     // 히트마커 — 내가 상대를 맞히면 조준점 빨강 플래시
     crossL.style.color = p1 && p1.hitMarker ? '#ff3b30' : 'rgba(255,255,255,0.7)';
     crossR.style.color = p2 && p2.hitMarker ? '#ff3b30' : 'rgba(255,255,255,0.7)';
+    // 저체력 붉은 비네트 — damage(0~1) 비례
+    vigL.style.opacity = p1 && p1.damage ? String(Math.min(0.85, p1.damage)) : '0';
+    vigR.style.opacity = p2 && p2.damage ? String(Math.min(0.85, p2.damage)) : '0';
   }
 
   return { update };
