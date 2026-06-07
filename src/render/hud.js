@@ -31,15 +31,21 @@ function makeStatus(leftPercent) {
   barOuter.appendChild(barFill);
   barOuter.appendChild(barText);
 
+  // 속도/고도 한 줄
+  const flight = document.createElement('div');
+  flight.style.cssText =
+    'font-size:13px;font-weight:700;color:#cfe6ff;text-shadow:0 1px 3px rgba(0,0,0,0.85)';
+
   // 무기 한 줄
   const weapons = document.createElement('div');
   weapons.style.cssText =
     'font-size:15px;font-weight:700;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.85)';
 
   wrap.appendChild(barOuter);
+  wrap.appendChild(flight);
   wrap.appendChild(weapons);
   document.body.appendChild(wrap);
-  return { barFill, barText, weapons };
+  return { barFill, barText, flight, weapons };
 }
 
 function hpColor(frac) {
@@ -123,6 +129,7 @@ function makeCrosshair(leftPercent) {
     'pointer-events:none;z-index:9;text-shadow:0 0 3px rgba(0,0,0,0.9)';
   el.textContent = '+';
   document.body.appendChild(el);
+  return el;
 }
 
 export function createHud() {
@@ -134,8 +141,8 @@ export function createHud() {
   const warnR = makeWarn(75);
   const boundsL = makeBounds(25);
   const boundsR = makeBounds(75);
-  makeCrosshair(25);
-  makeCrosshair(75);
+  const crossL = makeCrosshair(25);
+  const crossR = makeCrosshair(75);
   let blink = 0;
 
   function renderStatus(s, state) {
@@ -145,6 +152,14 @@ export function createHud() {
     s.barFill.style.width = `${frac * 100}%`;
     s.barFill.style.background = hpColor(frac);
     s.barText.textContent = `${Math.max(0, Math.round(hp))} / ${MAX_HP}`;
+    // 속도/고도 한 줄
+    if (typeof state?.speed === 'number') {
+      const kmh = Math.round(state.speed * 3.6);
+      const alt = Math.round(state.alt ?? 0);
+      s.flight.textContent = `${kmh} km/h   ↥ ${alt} m`;
+    } else {
+      s.flight.textContent = '';
+    }
     // 무기 한 줄
     const parts = [fmtGun(state?.gun), fmtMissile(state?.launcher), fmtFlare(state?.dispenser)].filter(Boolean);
     s.weapons.textContent = parts.join('   ');
@@ -183,6 +198,9 @@ export function createHud() {
     renderWarn(warnR, p2);
     boundsL.style.display = p1 && p1.bounds ? 'block' : 'none';
     boundsR.style.display = p2 && p2.bounds ? 'block' : 'none';
+    // 히트마커 — 내가 상대를 맞히면 조준점 빨강 플래시
+    crossL.style.color = p1 && p1.hitMarker ? '#ff3b30' : 'rgba(255,255,255,0.7)';
+    crossR.style.color = p2 && p2.hitMarker ? '#ff3b30' : 'rgba(255,255,255,0.7)';
   }
 
   return { update };

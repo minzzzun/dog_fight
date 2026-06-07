@@ -78,6 +78,12 @@ let bullets = [], missiles = [], flares = [];
 let combat = null;
 let prevAlive = [true, true];
 let abPhase = 0;
+// 타격감/FOV — 플레이어별 화면 흔들림·히트마커 타이머·부스터 상태
+const shake = [0, 0];        // 카메라 흔들림 세기(피격 시 증가, 매 프레임 감쇠)
+const hitFlash = [0, 0];     // 히트마커(상대 명중) 잔여 시간
+const boosting = [false, false];
+const HITFLASH_TIME = 0.12, SHAKE_HIT = 1.2, SHAKE_DEATH = 5;
+const BOOST_FOV = 90, FOV_LERP = 4;
 let lastColors = [0x2266ff, 0xff3322];
 
 function disposeMesh(mesh) {
@@ -204,6 +210,22 @@ function applyChase(camera, plane) {
   camera.lookAt(pose.lookAt.x, pose.lookAt.y, pose.lookAt.z);
 }
 
+// 부스터 시 FOV 확대(스피드감). 매 프레임 목표 FOV로 보간.
+function applyFov(camera, boost, dt) {
+  const target = boost ? BOOST_FOV : FOV;
+  const k = Math.min(1, FOV_LERP * dt);
+  camera.fov += (target - camera.fov) * k;
+  camera.updateProjectionMatrix();
+}
+
+// 피격 화면 흔들림 — 카메라 위치를 세기만큼 랜덤 오프셋(applyChase 이후 호출).
+function applyShake(camera, intensity) {
+  if (intensity <= 0) return;
+  camera.position.x += (Math.random() - 0.5) * intensity;
+  camera.position.y += (Math.random() - 0.5) * intensity;
+  camera.position.z += (Math.random() - 0.5) * intensity;
+}
+
 // 매치 전(select) 배경용 기본 카메라 — 지형 상공에서 내려다봄.
 function defaultCamera(camera) {
   camera.up.set(0, 1, 0);
@@ -233,6 +255,12 @@ function animate() {
 
   stepExplosions(explosionPool, dt);
 
+  // 타격감/FOV 타이머 감쇠
+  shake[0] = Math.max(0, shake[0] - dt * 4);
+  shake[1] = Math.max(0, shake[1] - dt * 4);
+  hitFlash[0] = Math.max(0, hitFlash[0] - dt);
+  hitFlash[1] = Math.max(0, hitFlash[1] - dt);
+
   if (plane1 && plane2) {
     applyPlaneTransform(meshP1, plane1);
     applyPlaneTransform(meshP2, plane2);
@@ -247,15 +275,21 @@ function animate() {
     const lockedBy0 = { locking: launcher2.lockTarget === 0 && launcher2.lockTimer > 0 && !launcher2.locked, locked: launcher2.lockTarget === 0 && launcher2.locked };
     const lockedBy1 = { locking: launcher1.lockTarget === 1 && launcher1.lockTimer > 0 && !launcher1.locked, locked: launcher1.lockTarget === 1 && launcher1.locked };
     hud.update(
-      { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1, hp: combat.players[0].hp, lockedBy: lockedBy0, bounds: plane1.warning },
-      { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2, hp: combat.players[1].hp, lockedBy: lockedBy1, bounds: plane2.warning },
+      { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1, hp: combat.players[0].hp, lockedBy: lockedBy0, bounds: plane1.warning, speed: plane1.speed, alt: plane1.y, hitMarker: hitFlash[0] > 0 },
+      { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2, hp: combat.players[1].hp, lockedBy: lockedBy1, bounds: plane2.warning, speed: plane2.speed, alt: plane2.y, hitMarker: hitFlash[1] > 0 },
       dt,
     );
     audio.lockWarn(lockedBy0.locked || lockedBy0.locking || lockedBy1.locked || lockedBy1.locking);
     audio.update({ speed: Math.max(plane1.speed, plane2.speed) }, dt);
 
+    // 부스터 시 FOV 확대(스피드감) — 플레이어별 카메라
+    applyFov(cameraL, boosting[0], dt);
+    applyFov(cameraR, boosting[1], dt);
+
     applyChase(cameraL, plane1);
     applyChase(cameraR, plane2);
+    applyShake(cameraL, shake[0]);   // 피격 흔들림
+    applyShake(cameraR, shake[1]);
     cameraL.updateMatrixWorld(); cameraR.updateMatrixWorld();
     lockReticle.update(
       { camera: cameraL, target: plane2, launcher: launcher1 },
@@ -320,8 +354,18 @@ function stepFight(dt) {
     if (h.position) { spawnExplosion(explosionPool, h.position.x, h.position.y, h.position.z, false); audio.explosion(false); }
   }
 
+  const hits = [...stepped.hits, ...steppedM.hits];
+  // 타격감: 맞은 쪽 화면 흔들림(데미지 비례), 쏜 쪽 히트마커 플래시
+  for (const h of hits) {
+    const tgt = typeof h.target === 'object' ? h.target.owner : h.target;
+    if (tgt === 0 || tgt === 1) shake[tgt] = Math.min(SHAKE_HIT * 3, shake[tgt] + (h.damage >= 50 ? SHAKE_HIT : SHAKE_HIT * 0.2));
+    if (h.owner === 0 || h.owner === 1) hitFlash[h.owner] = HITFLASH_TIME;
+  }
+  boosting[0] = combat.players[0].alive && p1.boost;
+  boosting[1] = combat.players[1].alive && p2.boost;
+
   combat = stepCombat(combat, {
-    hits: [...stepped.hits, ...steppedM.hits],
+    hits,
     planes: [plane1, plane2],
     terrainFn: (x, y, z) => terrainCollision(x, y, z, CRASH_MARGIN),
     margin: CRASH_MARGIN,
@@ -332,6 +376,7 @@ function stepFight(dt) {
     if (prevAlive[i] && !combat.players[i].alive) {
       spawnExplosion(explosionPool, planes[i].x, planes[i].y, planes[i].z, true);
       audio.death();
+      shake[i] = SHAKE_DEATH;   // 격추 시 큰 흔들림
     }
     prevAlive[i] = combat.players[i].alive;
   }
