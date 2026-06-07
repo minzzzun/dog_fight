@@ -1,387 +1,208 @@
-// flight.js 단위 테스트 (M1, 비행 모델 · 순수 로직)
+// flight.js 단위 테스트 — 쿼터니언 바디축 비행 모델
 //
-// TDD RED 단계: 구현(src/flight.js)은 아직 없다. 이 테스트만 먼저 작성한다.
-//
-// 가정 시그니처 (설계 mds/design/m1-flight.md §3·§8 기준):
-//   상수: BASE_SPEED, BOOST_SPEED, BRAKE_SPEED, MIN_SPEED, MAX_SPEED,
-//         ACCEL, DECEL, PITCH_RATE, ROLL_RATE, YAW_FROM_ROLL,
-//         ROLL_LEVEL_RATE, PITCH_LEVEL_RATE, PITCH_LIMIT, ROLL_LIMIT,
-//         WORLD_HALF, CEILING, FLOOR, BOUND_MARGIN, RETURN_RATE, SPAWN_Y
-//   createPlane(spawn = {}) → { x, y, z, yaw, pitch, roll, speed, warning }
-//   stepFlight(state, input, dt) → newState (불변, 새 객체)
-//     input = { pitch: -1..1, roll: -1..1, boost: bool, brake: bool }
-//   forwardOf(state) → {x,y,z}  // 기수 방향, 롤 무관, 길이 1
-//   upOf(state)      → {x,y,z}  // 천장 방향(롤 반영), 길이 1
-//   rightOf(state)   → {x,y,z}  // 우측 방향, 길이 1
-//   moveToward(a, b, maxStep) → number
-//   wrapAngle(a) → number  // (-π, π]
-//
-// 좌표 규약(설계 §1): 오른손, +Y 위, forward 기본자세 (0,0,-1), up (0,1,0).
-// 부동소수 비교는 toBeCloseTo.
+// 자세는 state.q(쿼터니언)로 보유. 검증은 forwardOf/upOf/rightOf 단위벡터로 한다.
+// 규약: 기본자세 forward=(0,0,-1), up=(0,1,0), right=(1,0,0).
+//   pitch +(W)=기수 위(forward.y↑), roll +(D)=우뱅크(up.x↑, right.y↓) → 우선회(forward.x↑).
+//   각도 유지(hold-attitude): 무입력이면 자세 유지(자동 복원 없음).
 import { describe, it, expect } from 'vitest';
 import {
-  BASE_SPEED, BOOST_SPEED, BRAKE_SPEED, MIN_SPEED, MAX_SPEED,
-  ACCEL, DECEL, PITCH_RATE, ROLL_RATE,
-  ROLL_LEVEL_RATE, PITCH_LEVEL_RATE, PITCH_LIMIT, ROLL_LIMIT,
-  WORLD_HALF, CEILING, FLOOR, BOUND_MARGIN, SPAWN_Y,
-  createPlane, stepFlight, forwardOf, upOf, rightOf,
-  moveToward, wrapAngle,
+  createPlane, stepFlight, forwardOf, upOf, rightOf, moveToward, wrapAngle,
+  BASE_SPEED, BOOST_SPEED, BRAKE_SPEED, MIN_SPEED, MAX_SPEED, ACCEL, DECEL,
+  SPAWN_Y, WORLD_HALF, CEILING, FLOOR,
 } from './flight.js';
 
-// 무입력(중립) 헬퍼
-const NEUTRAL = { pitch: 0, roll: 0, boost: false, brake: false };
-const input = (o = {}) => ({ ...NEUTRAL, ...o });
-
-// 길이(노름)
+const input = (o = {}) => ({ pitch: 0, roll: 0, boost: false, brake: false, ...o });
 const len = (v) => Math.hypot(v.x, v.y, v.z);
-// 내적(직교성 검사)
-const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+const close = (a, b, p = 5) => expect(a).toBeCloseTo(b, p);
 
-describe('createPlane — 초기 상태', () => {
-  it('기본값: 중앙·SPAWN_Y·정지자세·BASE_SPEED·warning false', () => {
+// ─────────────────────────────────────────────────────────────────────
+describe('보조 함수', () => {
+  it('moveToward 오버슈트 없음', () => {
+    expect(moveToward(0, 10, 3)).toBe(3);
+    expect(moveToward(0, 2, 3)).toBe(2);
+    expect(moveToward(10, 0, 3)).toBe(7);
+  });
+  it('wrapAngle (-π,π]', () => {
+    close(wrapAngle(0), 0); close(wrapAngle(Math.PI), Math.PI);
+    close(wrapAngle(Math.PI * 1.5), -Math.PI / 2);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+describe('createPlane — 기본 상태/자세', () => {
+  it('기본값: 중앙·SPAWN_Y·BASE_SPEED·미경고·q 보유', () => {
     const p = createPlane();
-    expect(p.x).toBe(0);
-    expect(p.y).toBe(SPAWN_Y);
-    expect(p.z).toBe(0);
-    expect(p.yaw).toBe(0);
-    expect(p.pitch).toBe(0);
-    expect(p.roll).toBe(0);
+    expect(p.x).toBe(0); expect(p.y).toBe(SPAWN_Y); expect(p.z).toBe(0);
     expect(p.speed).toBe(BASE_SPEED);
     expect(p.warning).toBe(false);
+    expect(p.q).toBeTruthy();
   });
-
-  it('spawn 인자를 반영한다', () => {
-    const p = createPlane({ x: 10, y: 500, z: -20, yaw: 1, speed: 150 });
-    expect(p.x).toBe(10);
-    expect(p.y).toBe(500);
-    expect(p.z).toBe(-20);
-    expect(p.yaw).toBe(1);
-    expect(p.speed).toBe(150);
-    // pitch/roll은 항상 0으로 시작
-    expect(p.pitch).toBe(0);
-    expect(p.roll).toBe(0);
+  it('기본 자세 forward/up/right', () => {
+    const p = createPlane();
+    const f = forwardOf(p), u = upOf(p), r = rightOf(p);
+    close(f.x, 0); close(f.y, 0); close(f.z, -1);
+    close(u.x, 0); close(u.y, 1); close(u.z, 0);
+    close(r.x, 1); close(r.y, 0); close(r.z, 0);
   });
-});
-
-describe('직진 (무입력·기본 자세)', () => {
-  it('forward(-Z)로 전진: z 감소, x·y 거의 불변', () => {
-    const p0 = createPlane();
-    let p = p0;
-    for (let i = 0; i < 10; i++) p = stepFlight(p, input(), 0.05);
-    expect(p.z).toBeLessThan(p0.z);          // -Z 전진
-    expect(p.x).toBeCloseTo(p0.x, 6);        // 좌우 이동 없음
-    expect(p.y).toBeCloseTo(p0.y, 6);        // 고도 유지(피치 0)
-  });
-
-  it('한 스텝 이동량 ≈ BASE_SPEED * dt', () => {
-    const p0 = createPlane();
-    const dt = 0.05;
-    const p = stepFlight(p0, input(), dt);
-    const dist = Math.hypot(p.x - p0.x, p.y - p0.y, p.z - p0.z);
-    expect(dist).toBeCloseTo(BASE_SPEED * dt, 4);
-  });
-
-  it('무입력 직진 중 자세(yaw/pitch/roll) 불변', () => {
-    let p = createPlane();
-    for (let i = 0; i < 10; i++) p = stepFlight(p, input(), 0.05);
-    expect(p.yaw).toBeCloseTo(0, 6);
-    expect(p.pitch).toBeCloseTo(0, 6);
-    expect(p.roll).toBeCloseTo(0, 6);
+  it('스폰 yaw=π → 기수 +Z', () => {
+    const p = createPlane({ yaw: Math.PI });
+    const f = forwardOf(p);
+    close(f.x, 0); close(f.z, 1, 5);
   });
 });
 
-describe('forwardOf / upOf / rightOf — 방향 규약', () => {
-  it('기본 자세에서 forward=(0,0,-1)', () => {
-    const f = forwardOf({ yaw: 0, pitch: 0, roll: 0 });
-    expect(f.x).toBeCloseTo(0, 6);
-    expect(f.y).toBeCloseTo(0, 6);
-    expect(f.z).toBeCloseTo(-1, 6);
-  });
-
-  it('기본 자세에서 up=(0,1,0)', () => {
-    const u = upOf({ yaw: 0, pitch: 0, roll: 0 });
-    expect(u.x).toBeCloseTo(0, 6);
-    expect(u.y).toBeCloseTo(1, 6);
-    expect(u.z).toBeCloseTo(0, 6);
-  });
-
-  it('forward는 단위벡터(길이 1)', () => {
-    const f = forwardOf({ yaw: 0.7, pitch: 0.3, roll: 0.5 });
-    expect(len(f)).toBeCloseTo(1, 6);
-  });
-
-  it('forward는 롤에 무관(yaw/pitch만 기여)', () => {
-    const base = { yaw: 0.4, pitch: 0.2, roll: 0 };
-    const rolled = { yaw: 0.4, pitch: 0.2, roll: 1.0 };
-    const a = forwardOf(base);
-    const b = forwardOf(rolled);
-    expect(b.x).toBeCloseTo(a.x, 6);
-    expect(b.y).toBeCloseTo(a.y, 6);
-    expect(b.z).toBeCloseTo(a.z, 6);
-  });
-
-  it('피치 +면 기수가 위로(forward.y > 0)', () => {
-    const f = forwardOf({ yaw: 0, pitch: 0.5, roll: 0 });
-    expect(f.y).toBeGreaterThan(0);
-  });
-
-  it('up/right도 단위벡터', () => {
-    const s = { yaw: 0.6, pitch: 0.3, roll: 0.4 };
-    expect(len(upOf(s))).toBeCloseTo(1, 6);
-    expect(len(rightOf(s))).toBeCloseTo(1, 6);
-  });
-
-  it('forward·up·right 서로 직교', () => {
-    const s = { yaw: 0.6, pitch: 0.3, roll: 0.4 };
-    const f = forwardOf(s), u = upOf(s), r = rightOf(s);
-    expect(dot(f, u)).toBeCloseTo(0, 6);
-    expect(dot(f, r)).toBeCloseTo(0, 6);
-    expect(dot(u, r)).toBeCloseTo(0, 6);
+// ─────────────────────────────────────────────────────────────────────
+describe('직진 (무입력)', () => {
+  it('forward 따라 전진(+자세 불변)', () => {
+    let p = createPlane();
+    const q0 = { ...p.q };
+    p = stepFlight(p, input(), 0.1);
+    close(p.z, -BASE_SPEED * 0.1, 3);  // -Z로 전진
+    close(p.x, 0); close(p.y, SPAWN_Y);
+    const f = forwardOf(p);
+    close(f.z, -1); close(f.x, 0); close(f.y, 0);
+    expect(Math.abs(p.q.w - q0.w)).toBeLessThan(1e-9);
   });
 });
 
-describe('피치 적분', () => {
-  it('pitch 입력 +면 pitch각 증가(기수 들림), 이후 상승', () => {
+// ─────────────────────────────────────────────────────────────────────
+describe('속도 — 부스터/감속/한계', () => {
+  it('부스터 → BOOST_SPEED 수렴(상한 MAX)', () => {
     let p = createPlane();
-    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ pitch: 1 }), 0.05);
-    expect(p.pitch).toBeGreaterThan(0);
-    const yBefore = p.y;
-    p = stepFlight(p, input({ pitch: 1 }), 0.05);
-    expect(p.y).toBeGreaterThan(yBefore);   // 기수 위 → 상승
-  });
-
-  it('pitch 입력 -면 pitch각 감소(기수 숙임), 이후 하강', () => {
-    let p = createPlane();
-    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ pitch: -1 }), 0.05);
-    expect(p.pitch).toBeLessThan(0);
-  });
-});
-
-describe('롤 적분', () => {
-  it('roll 입력 +면 roll각 증가(우뱅크)', () => {
-    let p = createPlane();
-    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ roll: 1 }), 0.05);
-    expect(p.roll).toBeGreaterThan(0);
-  });
-
-  it('roll 입력 -면 roll각 감소(좌뱅크)', () => {
-    let p = createPlane();
-    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ roll: -1 }), 0.05);
-    expect(p.roll).toBeLessThan(0);
-  });
-});
-
-describe('각도 유지 (hold-attitude, 자동 복원 없음)', () => {
-  it('roll 만든 뒤 무입력 → roll 유지(복원 안 됨)', () => {
-    let p = createPlane();
-    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ roll: 1 }), 0.05);
-    const held = p.roll;
-    expect(held).toBeGreaterThan(0);
-    for (let i = 0; i < 100; i++) p = stepFlight(p, input(), 0.05);
-    expect(p.roll).toBeCloseTo(held, 6);   // 그대로 유지
-  });
-
-  it('pitch 만든 뒤 무입력 → pitch 유지', () => {
-    let p = createPlane();
-    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ pitch: 1 }), 0.05);
-    const held = p.pitch;
-    expect(held).toBeGreaterThan(0);
-    for (let i = 0; i < 100; i++) p = stepFlight(p, input(), 0.05);
-    expect(p.pitch).toBeCloseTo(held, 6);
-  });
-
-  it('롤을 기울인 채 두면 무입력이어도 yaw가 계속 변함(뱅크턴 지속)', () => {
-    let p = createPlane();
-    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ roll: 1 }), 0.05);
-    const yaw0 = p.yaw;
-    for (let i = 0; i < 10; i++) p = stepFlight(p, input(), 0.05);  // 손 뗀 채
-    expect(p.yaw).not.toBeCloseTo(yaw0, 3);   // 기운 채라 계속 선회
-  });
-});
-
-describe('뱅크턴 (롤 → yaw 선회)', () => {
-  it('우뱅크(roll>0) 유지 → yaw가 우선회 방향으로 단조 변화', () => {
-    let p = createPlane();
-    // 롤을 양수로 세팅
-    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ roll: 1 }), 0.05);
-    expect(p.roll).toBeGreaterThan(0);
-    // 롤 유지하며 yaw 변화 관찰 — 설계 §5d: 우뱅크는 yaw 감소(우선회)
-    const yaw0 = p.yaw;
-    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ roll: 1 }), 0.05);
-    expect(p.yaw).toBeLessThan(yaw0);
-  });
-
-  it('roll=0이면 yaw 불변', () => {
-    let p = createPlane();
-    const yaw0 = p.yaw;
-    for (let i = 0; i < 10; i++) p = stepFlight(p, input(), 0.05);
-    expect(p.yaw).toBeCloseTo(yaw0, 6);
-  });
-});
-
-describe('부스터 / 감속', () => {
-  it('boost → 속도가 BASE에서 BOOST로 증가(상한 초과 없음)', () => {
-    let p = createPlane();
-    expect(p.speed).toBe(BASE_SPEED);
     for (let i = 0; i < 200; i++) p = stepFlight(p, input({ boost: true }), 0.05);
-    expect(p.speed).toBeGreaterThan(BASE_SPEED);
-    expect(p.speed).toBeCloseTo(BOOST_SPEED, 4);
+    close(p.speed, BOOST_SPEED, 4);
     expect(p.speed).toBeLessThanOrEqual(MAX_SPEED + 1e-9);
   });
-
-  it('brake → 속도가 BRAKE로 감소(하한 미만 없음)', () => {
+  it('감속 → BRAKE_SPEED 수렴(하한 MIN)', () => {
     let p = createPlane();
     for (let i = 0; i < 200; i++) p = stepFlight(p, input({ brake: true }), 0.05);
-    expect(p.speed).toBeLessThan(BASE_SPEED);
-    expect(p.speed).toBeCloseTo(BRAKE_SPEED, 4);
+    close(p.speed, BRAKE_SPEED, 4);
     expect(p.speed).toBeGreaterThanOrEqual(MIN_SPEED - 1e-9);
   });
-
-  it('boost+brake 동시 → brake 우선(목표=BRAKE)', () => {
+  it('가/감속 한 스텝 변화량 ≤ ACCEL/DECEL·dt', () => {
+    const dt = 0.05;
     let p = createPlane();
-    for (let i = 0; i < 200; i++) p = stepFlight(p, input({ boost: true, brake: true }), 0.05);
-    expect(p.speed).toBeCloseTo(BRAKE_SPEED, 4);
-  });
-
-  it('boost 가속이 한 스텝당 ACCEL*dt를 넘지 않는다', () => {
-    const dt = 0.05;
-    const p0 = createPlane();
-    const p = stepFlight(p0, input({ boost: true }), dt);
-    expect(p.speed - p0.speed).toBeLessThanOrEqual(ACCEL * dt + 1e-9);
-  });
-
-  it('brake 감속이 한 스텝당 DECEL*dt를 넘지 않는다', () => {
-    const dt = 0.05;
-    const p0 = createPlane();
-    const p = stepFlight(p0, input({ brake: true }), dt);
-    expect(p0.speed - p.speed).toBeLessThanOrEqual(DECEL * dt + 1e-9);
+    const a = stepFlight(p, input({ boost: true }), dt);
+    expect(a.speed - p.speed).toBeLessThanOrEqual(ACCEL * dt + 1e-9);
+    const b = stepFlight(p, input({ brake: true }), dt);
+    expect(p.speed - b.speed).toBeLessThanOrEqual(DECEL * dt + 1e-9);
   });
 });
 
-describe('속도 한계 (MIN/MAX 클램프)', () => {
-  it('과속 상태로 시작해도 MAX 이하로 클램프', () => {
-    const s = { x: 0, y: SPAWN_Y, z: 0, yaw: 0, pitch: 0, roll: 0, speed: 9999, warning: false };
-    const p = stepFlight(s, input({ boost: true }), 0.05);
-    expect(p.speed).toBeLessThanOrEqual(MAX_SPEED + 1e-9);
+// ─────────────────────────────────────────────────────────────────────
+describe('피치 — 기수 위/아래', () => {
+  it('pitch +(W) → 기수 위(forward.y > 0)', () => {
+    let p = createPlane();
+    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ pitch: 1 }), 0.05);
+    expect(forwardOf(p).y).toBeGreaterThan(0);
   });
-
-  it('저속 상태로 시작해도 MIN 이상으로 클램프', () => {
-    const s = { x: 0, y: SPAWN_Y, z: 0, yaw: 0, pitch: 0, roll: 0, speed: 0, warning: false };
-    const p = stepFlight(s, input({ brake: true }), 0.05);
-    expect(p.speed).toBeGreaterThanOrEqual(MIN_SPEED - 1e-9);
+  it('pitch −(S) → 기수 아래(forward.y < 0)', () => {
+    let p = createPlane();
+    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ pitch: -1 }), 0.05);
+    expect(forwardOf(p).y).toBeLessThan(0);
   });
 });
 
-describe('월드 경계 — warning + 강제선회', () => {
-  it('중앙(x=0)에서는 warning false', () => {
-    const p = stepFlight(createPlane(), input(), 0.05);
-    expect(p.warning).toBe(false);
+// ─────────────────────────────────────────────────────────────────────
+describe('롤 — 뱅크 + 뱅크턴', () => {
+  it('roll +(D) → 우뱅크(up.x > 0, right.y < 0)', () => {
+    let p = createPlane();
+    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ roll: 1 }), 0.05);
+    expect(upOf(p).x).toBeGreaterThan(0);
+    expect(rightOf(p).y).toBeLessThan(0);
   });
-
-  it('margin 안으로 스폰하면 첫 스텝 후 warning true', () => {
-    const s = createPlane({ x: WORLD_HALF - 100, y: SPAWN_Y, z: 0 });
-    const p = stepFlight(s, input(), 0.05);
-    expect(p.warning).toBe(true);
+  it('우뱅크 유지 → 우선회(forward.x 증가, +X 쪽)', () => {
+    let p = createPlane();
+    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ roll: 1 }), 0.05);  // 뱅크 만들기
+    const fx0 = forwardOf(p).x;
+    for (let i = 0; i < 20; i++) p = stepFlight(p, input(), 0.05);            // 손 떼도 뱅크 유지→선회
+    expect(forwardOf(p).x).toBeGreaterThan(fx0);
   });
+  it('좌뱅크(roll −, A) → 좌선회(forward.x 감소)', () => {
+    let p = createPlane();
+    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ roll: -1 }), 0.05);
+    expect(upOf(p).x).toBeLessThan(0);
+    const fx0 = forwardOf(p).x;
+    for (let i = 0; i < 20; i++) p = stepFlight(p, input(), 0.05);
+    expect(forwardOf(p).x).toBeLessThan(fx0);
+  });
+});
 
-  it('경계 바깥을 향해도 강제선회로 yaw가 중심 방향으로 보정되어 복귀 경향', () => {
-    // x를 양의 경계 근처에 두고 기수를 +X(바깥)로 향하게 한다.
-    // forward는 yaw로 수평면에서 결정 — 바깥(+X)을 보도록 yaw 설정.
-    // 정확한 yaw 부호는 구현 의존이므로, 여러 스텝 적분 후
-    // 중심(x=0) 쪽으로 복귀 경향(|x| 증가가 멈추고 결국 감소)을 검증한다.
-    let p = createPlane({ x: WORLD_HALF - 50, y: SPAWN_Y, z: 0 });
-    // 바깥을 향하는 yaw를 forwardOf로 찾는다: forward.x>0 인 yaw 탐색
-    let bestYaw = 0, bestX = -Infinity;
-    for (let k = 0; k < 360; k++) {
-      const yaw = (k / 360) * 2 * Math.PI - Math.PI;
-      const fx = forwardOf({ yaw, pitch: 0, roll: 0 }).x;
-      if (fx > bestX) { bestX = fx; bestYaw = yaw; }
+// ─────────────────────────────────────────────────────────────────────
+describe('각도 유지 (hold-attitude)', () => {
+  it('피치 만든 뒤 무입력 → forward.y 유지', () => {
+    let p = createPlane();
+    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ pitch: 1 }), 0.05);
+    const fy = forwardOf(p).y;
+    for (let i = 0; i < 50; i++) p = stepFlight(p, input(), 0.05);
+    close(forwardOf(p).y, fy, 5);   // 복원 없음(유지)
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+describe('자세 무결성 — 짐벌락/반전 없음', () => {
+  it('지속 피치업으로 수직 초과(공중제비) — 단위벡터 유지·수직 넘어감', () => {
+    let p = createPlane();
+    let wentOverTop = false;
+    for (let i = 0; i < 60; i++) {
+      p = stepFlight(p, input({ pitch: 1 }), 0.05);
+      const f = forwardOf(p);
+      close(len(f), 1, 6);                 // 항상 단위
+      close(len(upOf(p)), 1, 6);
+      if (f.z > 0.3) wentOverTop = true;   // 기수가 뒤로(수직 넘어 루프) → 86° 제한 없음
     }
-    p = { ...p, yaw: bestYaw };
-    let maxX = p.x;
-    for (let i = 0; i < 400; i++) {
+    expect(wentOverTop).toBe(true);
+  });
+  it('q는 항상 정규화(노름≈1)', () => {
+    let p = createPlane();
+    for (let i = 0; i < 30; i++) p = stepFlight(p, input({ pitch: 0.7, roll: 0.5 }), 0.05);
+    close(Math.hypot(p.q.x, p.q.y, p.q.z, p.q.w), 1, 6);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+describe('월드 경계 — 경고 + 강제선회', () => {
+  it('경계 근처면 warning, 바깥 향해도 안쪽으로 선회(달아나지 않음)', () => {
+    // +x 경계 근처, 기수 +x(바깥). yaw=-π/2 → forward≈(1,0,0)
+    let p = createPlane({ x: WORLD_HALF - 100, z: 0, yaw: -Math.PI / 2 });
+    expect(forwardOf(p).x).toBeGreaterThan(0.5);
+    let warned = false, maxX = p.x;
+    for (let i = 0; i < 200; i++) {
       p = stepFlight(p, input(), 0.05);
-      if (p.x > maxX) maxX = p.x;
+      if (p.warning) warned = true;
+      maxX = Math.max(maxX, p.x);
     }
-    // 강제선회가 중심 쪽으로 당겨 결국 안쪽으로 복귀 → 마지막 x가 최고점보다 낮음
-    expect(p.x).toBeLessThan(maxX);
-    // 위치가 경계를 크게 못 벗어남(보이지 않는 벽)
-    expect(p.x).toBeLessThan(WORLD_HALF + BOUND_MARGIN);
-    expect(p.warning).toBe(true);
+    expect(warned).toBe(true);
+    expect(maxX).toBeLessThan(WORLD_HALF + 200);   // 벽처럼 막혀 무한히 못 나감
   });
 });
 
-describe('고도 천장/바닥 클램프', () => {
-  it('상승 입력을 오래 줘도 y가 CEILING을 넘지 않음', () => {
-    let p = createPlane({ y: CEILING - 50 });
-    for (let i = 0; i < 500; i++) p = stepFlight(p, input({ pitch: 1 }), 0.05);
-    expect(p.y).toBeLessThanOrEqual(CEILING + 1e-6);
+// ─────────────────────────────────────────────────────────────────────
+describe('고도 클램프', () => {
+  it('바닥 아래로 안 내려감(y ≥ FLOOR)', () => {
+    let p = createPlane({ y: 30 });
+    for (let i = 0; i < 50; i++) p = stepFlight(p, input({ pitch: -1 }), 0.05);
+    expect(p.y).toBeGreaterThanOrEqual(FLOOR);
   });
-
-  it('하강 입력을 오래 줘도 y가 FLOOR 밑으로 안 감', () => {
-    let p = createPlane({ y: FLOOR + 50 });
-    for (let i = 0; i < 500; i++) p = stepFlight(p, input({ pitch: -1 }), 0.05);
-    expect(p.y).toBeGreaterThanOrEqual(FLOOR - 1e-6);
+  it('천장 위로 안 올라감(y ≤ CEILING)', () => {
+    let p = createPlane({ y: CEILING - 30 });
+    for (let i = 0; i < 50; i++) p = stepFlight(p, input({ pitch: 1 }), 0.05);
+    expect(p.y).toBeLessThanOrEqual(CEILING);
   });
 });
 
-describe('결정론 / 불변성', () => {
-  it('같은 (state,input,dt) → 깊은 동등(서로 다른 객체, 값 동일)', () => {
-    const s = createPlane({ x: 5, y: 400, z: -3, yaw: 0.2 });
-    const a = stepFlight(s, input({ pitch: 0.5, roll: 0.3, boost: true }), 0.05);
-    const b = stepFlight(s, input({ pitch: 0.5, roll: 0.3, boost: true }), 0.05);
+// ─────────────────────────────────────────────────────────────────────
+describe('불변성/결정론', () => {
+  it('입력 state를 변형하지 않음', () => {
+    const p = createPlane();
+    const x0 = p.x, qw0 = p.q.w;
+    stepFlight(p, input({ pitch: 1, roll: 1 }), 0.05);
+    expect(p.x).toBe(x0); expect(p.q.w).toBe(qw0);
+  });
+  it('같은 입력 → 같은 출력', () => {
+    const p = createPlane({ x: 10, z: -20, yaw: 0.3 });
+    const a = stepFlight(p, input({ pitch: 0.5, roll: -0.3, boost: true }), 0.05);
+    const b = stepFlight(p, input({ pitch: 0.5, roll: -0.3, boost: true }), 0.05);
     expect(a).toEqual(b);
-    expect(a).not.toBe(b);
-  });
-
-  it('stepFlight가 입력 state를 변형하지 않음(새 객체 반환)', () => {
-    const s = createPlane({ x: 1, y: 300, z: -2, yaw: 0.1 });
-    const snapshot = { ...s };
-    const out = stepFlight(s, input({ pitch: 1, roll: 1, boost: true }), 0.05);
-    // 원본 불변
-    expect(s).toEqual(snapshot);
-    // 새 객체
-    expect(out).not.toBe(s);
-  });
-});
-
-describe('moveToward — 보조', () => {
-  it('maxStep이 거리 이상이면 정확히 b 도달(오버슈트 없음)', () => {
-    expect(moveToward(0, 10, 100)).toBe(10);
-    expect(moveToward(10, 0, 100)).toBe(0);
-  });
-
-  it('maxStep만큼만 이동(목표 방향)', () => {
-    expect(moveToward(0, 10, 3)).toBeCloseTo(3, 6);
-    expect(moveToward(10, 0, 3)).toBeCloseTo(7, 6);
-  });
-
-  it('이미 목표면 그대로', () => {
-    expect(moveToward(5, 5, 2)).toBe(5);
-  });
-});
-
-describe('wrapAngle — 보조 (-π, π] 정규화', () => {
-  it('범위 안 값은 그대로', () => {
-    expect(wrapAngle(0)).toBeCloseTo(0, 6);
-    expect(wrapAngle(1)).toBeCloseTo(1, 6);
-    expect(wrapAngle(-1)).toBeCloseTo(-1, 6);
-  });
-
-  it('π 초과는 음수 측으로 래핑', () => {
-    expect(wrapAngle(Math.PI + 0.5)).toBeCloseTo(-Math.PI + 0.5, 6);
-  });
-
-  it('2π 더해도 동일 각', () => {
-    expect(wrapAngle(0.3 + 2 * Math.PI)).toBeCloseTo(0.3, 6);
-    expect(wrapAngle(0.3 - 2 * Math.PI)).toBeCloseTo(0.3, 6);
-  });
-
-  it('결과가 (-π, π] 범위 안', () => {
-    for (let k = -10; k <= 10; k++) {
-      const w = wrapAngle(k * 1.3);
-      expect(w).toBeGreaterThan(-Math.PI - 1e-9);
-      expect(w).toBeLessThanOrEqual(Math.PI + 1e-9);
-    }
   });
 });
