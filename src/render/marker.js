@@ -38,5 +38,9 @@ export function createMarker(scene, colorHex) {
     update(x, y, z) {
       group.position.set(x, y, z);
     },
+    setColor(hex) {
+      beamMat.color.setHex(hex);
+      dMat.color.setHex(hex);
+    },
   };
 }
