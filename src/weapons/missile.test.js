@@ -82,7 +82,8 @@ describe('상수 — seed 수치', () => {
     expect(MISSILE_RANGE).toBeCloseTo(MISSILE_MAX_SPEED * MISSILE_LIFE, 3);
     expect(HIT_RADIUS).toBe(18);
     expect(MUZZLE_OFFSET).toBe(10);
-    expect(FLARE_DECOY_RADIUS).toBe(80);
+    expect(FLARE_DECOY_RADIUS).toBe(200);
+    expect(missileMod.FLARE_PROTECT_RADIUS).toBe(350);
   });
 });
 

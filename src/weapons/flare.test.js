@@ -33,9 +33,9 @@ describe('상수 — seed 수치', () => {
     expect(FLARE_LIFE).toBe(6); // 보강: 디코이 지속 3→6초
   });
 
-  it('FLARE_RADIUS는 missile.FLARE_DECOY_RADIUS와 정합(=80)', () => {
+  it('FLARE_RADIUS는 missile.FLARE_DECOY_RADIUS와 정합(=200)', () => {
     expect(FLARE_RADIUS).toBe(FLARE_DECOY_RADIUS);
-    expect(FLARE_RADIUS).toBe(80);
+    expect(FLARE_RADIUS).toBe(200);
   });
 });
 

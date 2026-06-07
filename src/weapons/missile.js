@@ -34,7 +34,8 @@ export const HIT_RADIUS     = 18;           // 기체 명중 반경(m) — gun(1
 export const MUZZLE_OFFSET  = 10;           // 발사점 = shooter.pos + forward * MUZZLE_OFFSET
 
 // 플레어 디코이
-export const FLARE_DECOY_RADIUS = 80;       // 미사일이 이 반경 내 활성 flare에 끌리는 거리(m)
+export const FLARE_DECOY_RADIUS = 200;      // 미사일이 이 반경 내 활성 flare에 끌리는 거리(m) — 2.5배 강화
+export const FLARE_PROTECT_RADIUS = 350;    // 표적이 이 반경 내에 플레어를 띄우면 각도 무관 디코이(자기 플레어)
 
 // ── 보조 함수 ────────────────────────────────────────────────────────
 
@@ -232,11 +233,20 @@ function aimPoint(m, targets, flares) {
   const tgt = targets.find((t) => t.owner === m.target && t.alive !== false);
   const aim = tgt ? { x: tgt.x, y: tgt.y, z: tgt.z } : null;
 
-  // (3) 디코이 트리거: 활성 flare 중 미사일과의 거리 ≤ max(FLARE_DECOY_RADIUS, flare.radius)
-  const decoy = flares.find((fl) =>
-    fl.life > 0 &&
-    dist2(m.x, m.y, m.z, fl.x, fl.y, fl.z) <= Math.max(FLARE_DECOY_RADIUS, fl.radius || 0) ** 2
+  const fl = flares || [];
+  // (3a) 디코이 트리거: 활성 flare 중 미사일과의 거리 ≤ max(FLARE_DECOY_RADIUS, flare.radius)
+  let decoy = fl.find((f) =>
+    f.life > 0 &&
+    dist2(m.x, m.y, m.z, f.x, f.y, f.z) <= Math.max(FLARE_DECOY_RADIUS, f.radius || 0) ** 2
   );
+  // (3b) 표적 보호: 추적 대상이 자기 플레어를 FLARE_PROTECT_RADIUS 내에 띄우면 각도 무관 디코이.
+  //      (미사일이 플레어 옆을 안 지나가도, 표적이 플레어를 터뜨리면 끌려간다)
+  if (!decoy && tgt) {
+    decoy = fl.find((f) =>
+      f.life > 0 && f.owner === m.target &&
+      dist2(tgt.x, tgt.y, tgt.z, f.x, f.y, f.z) <= FLARE_PROTECT_RADIUS ** 2
+    );
+  }
   if (decoy) return { x: decoy.x, y: decoy.y, z: decoy.z, _decoy: true };
 
   return aim;
