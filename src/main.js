@@ -14,10 +14,12 @@ import { createMissilePool, syncMissiles } from './render/missileMesh.js';
 import { createFlarePool, syncFlares } from './render/flareMesh.js';
 import { createMarker } from './render/marker.js';
 import { createExplosionPool, spawnExplosion, stepExplosions } from './render/explosion.js';
+import { createSmokePool, emitSmoke, stepSmoke } from './render/smoke.js';
+import { createContrailPool, emitContrail, stepContrail } from './render/contrail.js';
 import { createLockReticle } from './render/lockReticle.js';
 import { createHud } from './render/hud.js';
 import { targetIndicator } from './radar.js';
-import { createPlane, stepFlight, forwardOf, MAX_SPEED } from './flight.js';
+import { createPlane, stepFlight, forwardOf, rightOf, upOf, MAX_SPEED } from './flight.js';
 import { createInput, onKeyDown, onKeyUp, readInputs } from './input.js';
 import { createGun, stepGun, stepBullets } from './weapons/gun.js';
 import { createMissileLauncher, stepLock, stepMissiles } from './weapons/missile.js';
@@ -53,6 +55,8 @@ const bulletPool = createBulletPool(scene);
 const missilePool = createMissilePool(scene);
 const flarePool = createFlarePool(scene);
 const explosionPool = createExplosionPool(scene);
+const smokePool = createSmokePool(scene);
+const contrailPool = createContrailPool(scene);
 const markerP1 = createMarker(scene, 0x2266ff);
 const markerP2 = createMarker(scene, 0xff3322);
 markerP1.group.visible = false;
@@ -84,6 +88,9 @@ const hitFlash = [0, 0];     // 히트마커(상대 명중) 잔여 시간
 const boosting = [false, false];
 const HITFLASH_TIME = 0.12, SHAKE_HIT = 1.2, SHAKE_DEATH = 5;
 const BOOST_FOV = 90, FOV_LERP = 4;
+// 데미지 상태 — 저체력이면 연기 + 기동 둔화
+const LOW_HP = 40, SLUGGISH = 0.4, SMOKE_INTERVAL = 0.06;
+const smokeTimer = [0, 0];
 let lastColors = [0x2266ff, 0xff3322];
 
 function disposeMesh(mesh) {
@@ -254,6 +261,8 @@ function animate() {
   if (sessionState === 'fighting') stepFight(dt);
 
   stepExplosions(explosionPool, dt);
+  stepSmoke(smokePool, dt);
+  stepContrail(contrailPool, dt);
 
   // 타격감/FOV 타이머 감쇠
   shake[0] = Math.max(0, shake[0] - dt * 4);
@@ -310,12 +319,45 @@ function stepFight(dt) {
   const a0 = combat.players[0].alive;
   const a1 = combat.players[1].alive;
 
-  if (a0) plane1 = stepFlight(plane1, p1, dt);
-  if (a1) plane2 = stepFlight(plane2, p2, dt);
+  // 데미지 상태: 저체력이면 조향/피치 둔화 + 부스터 불가(기동 둔화)
+  const low0 = combat.players[0].hp < LOW_HP;
+  const low1 = combat.players[1].hp < LOW_HP;
+  const ip1 = low0 ? { ...p1, pitch: p1.pitch * SLUGGISH, roll: p1.roll * SLUGGISH, boost: false } : p1;
+  const ip2 = low1 ? { ...p2, pitch: p2.pitch * SLUGGISH, roll: p2.roll * SLUGGISH, boost: false } : p2;
+
+  if (a0) plane1 = stepFlight(plane1, ip1, dt);
+  if (a1) plane2 = stepFlight(plane2, ip2, dt);
 
   abPhase += dt;
-  setAfterburner(meshP1, a0 && p1.boost, abPhase);
-  setAfterburner(meshP2, a1 && p2.boost, abPhase);
+  setAfterburner(meshP1, a0 && ip1.boost, abPhase);
+  setAfterburner(meshP2, a1 && ip2.boost, abPhase);
+
+  // 컨트레일 — 부스터 시 양 날개끝에서 흰 비행운
+  for (let i = 0; i < 2; i++) {
+    const pl = i === 0 ? plane1 : plane2;
+    const boost = i === 0 ? (a0 && ip1.boost) : (a1 && ip2.boost);
+    if (boost) {
+      const r = rightOf(pl), f = forwardOf(pl);
+      const bx = pl.x - f.x * 3, by = pl.y - f.y * 3, bz = pl.z - f.z * 3;
+      emitContrail(contrailPool, bx + r.x * 4, by + r.y * 4, bz + r.z * 4);
+      emitContrail(contrailPool, bx - r.x * 4, by - r.y * 4, bz - r.z * 4);
+    }
+  }
+
+  // 저체력 연기 트레일 — 기체 꼬리(forward 반대)에서 주기적 방출
+  for (let i = 0; i < 2; i++) {
+    const pl = i === 0 ? plane1 : plane2;
+    const alive = i === 0 ? a0 : a1;
+    const low = i === 0 ? low0 : low1;
+    if (alive && low) {
+      smokeTimer[i] += dt;
+      if (smokeTimer[i] >= SMOKE_INTERVAL) {
+        smokeTimer[i] = 0;
+        const f = forwardOf(pl);
+        emitSmoke(smokePool, pl.x - f.x * 4, pl.y - f.y * 4, pl.z - f.z * 4);
+      }
+    }
+  }
 
   const fire1 = stepGun(gun1, { firing: a0 && p1.gun, shooter: { ...plane1, owner: 0 } }, dt);
   gun1 = fire1.gun;

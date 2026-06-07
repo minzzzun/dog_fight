@@ -28,7 +28,7 @@ export const ROLL_LEVEL_RATE  = 2.0; // 롤 0 복원 각속도
 export const PITCH_LEVEL_RATE = 0.8; // 피치 0 복원 각속도(완만)
 
 // 자세 한계(짐벌락 회피)
-export const PITCH_LIMIT = 2.0;   // ≈ ±115° — 수직 넘어 코브라(기수 뒤로 젖힘) 허용
+export const PITCH_LIMIT = 1.5;   // ≈ ±86° — 90° 미만으로 제한(뒤집힘→좌우 반전 버그 방지, 코브라는 거의 수직까지)
 export const ROLL_LIMIT  = 1.4;   // 시각적 뱅크 한계
 
 // 월드 경계
