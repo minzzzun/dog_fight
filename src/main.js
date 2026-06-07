@@ -247,8 +247,8 @@ function animate() {
     const lockedBy0 = { locking: launcher2.lockTarget === 0 && launcher2.lockTimer > 0 && !launcher2.locked, locked: launcher2.lockTarget === 0 && launcher2.locked };
     const lockedBy1 = { locking: launcher1.lockTarget === 1 && launcher1.lockTimer > 0 && !launcher1.locked, locked: launcher1.lockTarget === 1 && launcher1.locked };
     hud.update(
-      { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1, hp: combat.players[0].hp, lockedBy: lockedBy0 },
-      { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2, hp: combat.players[1].hp, lockedBy: lockedBy1 },
+      { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1, hp: combat.players[0].hp, lockedBy: lockedBy0, bounds: plane1.warning },
+      { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2, hp: combat.players[1].hp, lockedBy: lockedBy1, bounds: plane2.warning },
       dt,
     );
     audio.lockWarn(lockedBy0.locked || lockedBy0.locking || lockedBy1.locked || lockedBy1.locking);

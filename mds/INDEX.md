@@ -29,6 +29,7 @@
 - [m9-hud.md](done/m9-hud.md) — M9 HUD 폴리시(체력바+정돈) + 무기/플레어 시간재장전·0발락온차단·사거리2000·피락온경고·재장전시간(전체 347 그린).
 - [m10-audio.md](done/m10-audio.md) — M10 절차적 사운드(엔진·기관총·미사일·폭발·격추·피락온 beep·BGM, ` 음소거) + 코브라/가속이펙트, audio 테스트 41(전체 388 그린).
 - [m11-start-result.md](done/m11-start-result.md) — M11 시작화면(색 선택 중복불가)+결과창/재대결, main startMatch 리팩터, colors 테스트 13(전체 396 그린).
+- [m12-finish.md](done/m12-finish.md) — M12 마감(README·경계경고 HUD)+ACCEPTANCE 전 항목 충족(전체 396 그린). **게임 완성.**
 
 ## 진행 현황 (마일스톤)
 | # | 마일스톤 | 상태 | 문서 |
@@ -46,4 +47,4 @@
 | M9 | 분할 HUD(체력바·탄약·미사일/플레어·락온·피락온경고) | ✅ 완료 | [done/m9-hud.md](done/m9-hud.md) |
 | M10 | 사운드(엔진+효과음+격추+음악) | ✅ 완료 | [done/m10-audio.md](done/m10-audio.md) |
 | M11 | 시작화면(색 선택 중복불가) + 결과창/재대결 | ✅ 완료 | [done/m11-start-result.md](done/m11-start-result.md) |
-| M12 | 마감/통합/ACCEPTANCE 검증 | ⬜ 대기 | — |
+| M12 | 마감/통합/ACCEPTANCE 검증 | ✅ 완료 | [done/m12-finish.md](done/m12-finish.md) |

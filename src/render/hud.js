@@ -102,6 +102,18 @@ function makeWarn(leftPercent) {
   return el;
 }
 
+// ── 경계 이탈 경고(각 절반 상단, 경고들 위) ──────────────────────────
+function makeBounds(leftPercent) {
+  const el = document.createElement('div');
+  el.style.cssText =
+    'position:fixed;top:108px;left:' + leftPercent + '%;transform:translateX(-50%);' +
+    'color:#ff8a3a;font-family:system-ui,monospace;font-weight:800;font-size:18px;' +
+    'text-shadow:0 1px 4px rgba(0,0,0,0.9);pointer-events:none;z-index:12;display:none';
+  el.textContent = '🧭 경계 이탈 — 복귀 중';
+  document.body.appendChild(el);
+  return el;
+}
+
 // ── 중앙 조준점 ──────────────────────────────────────────────────────
 function makeCrosshair(leftPercent) {
   const el = document.createElement('div');
@@ -120,6 +132,8 @@ export function createHud() {
   const arrowR = makeArrow(75);
   const warnL = makeWarn(25);
   const warnR = makeWarn(75);
+  const boundsL = makeBounds(25);
+  const boundsR = makeBounds(75);
   makeCrosshair(25);
   makeCrosshair(75);
   let blink = 0;
@@ -167,6 +181,8 @@ export function createHud() {
     renderArrow(arrowR, p2);
     renderWarn(warnL, p1);
     renderWarn(warnR, p2);
+    boundsL.style.display = p1 && p1.bounds ? 'block' : 'none';
+    boundsR.style.display = p2 && p2.bounds ? 'block' : 'none';
   }
 
   return { update };
