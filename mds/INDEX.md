@@ -28,8 +28,9 @@
 - [m8-combat.md](done/m8-combat.md) — M8 전투(체력·충돌 즉사·승패) + 위치 마커/미사일 모양 폴리시, combat 테스트 48(전체 338 그린).
 - [m9-hud.md](done/m9-hud.md) — M9 HUD 폴리시(체력바+정돈) + 무기/플레어 시간재장전·0발락온차단·사거리2000·피락온경고·재장전시간(전체 347 그린).
 - [m10-audio.md](done/m10-audio.md) — M10 절차적 사운드(엔진·기관총·미사일·폭발·격추·피락온 beep·BGM, ` 음소거) + 코브라/가속이펙트, audio 테스트 41(전체 388 그린).
-- [m11-start-result.md](done/m11-start-result.md) — M11 시작화면(색 선택 중복불가)+결과창/재대결, main startMatch 리팩터, colors 테스트 13(전체 396 그린).
-- [m12-finish.md](done/m12-finish.md) — M12 마감(README·경계경고 HUD)+ACCEPTANCE 전 항목 충족(전체 396 그린). **게임 완성.**
+- [m11-start-result.md](done/m11-start-result.md) — M11 시작화면(색 선택 중복불가)+결과창/재대결, main startMatch 리팩터, colors 테스트 13(전체 412 그린).
+- [m12-finish.md](done/m12-finish.md) — M12 마감(README·경계경고 HUD)+ACCEPTANCE 전 항목 충족(전체 412 그린). **게임 완성.**
+- [m13-15-post-launch.md](done/m13-15-post-launch.md) — 포스트 런치: M13 미사일 연기+비행음·M14 근접 록온 보정+조준 보조(근접/장거리)·M15 낮밤 사이클+밤 항법등 / 폴리시(경기 타이머·일시정지 ESC·미사일 근접경보·AI 연습 모드)(전체 412 그린).
 
 ## 진행 현황 (마일스톤)
 | # | 마일스톤 | 상태 | 문서 |
@@ -48,3 +49,7 @@
 | M10 | 사운드(엔진+효과음+격추+음악) | ✅ 완료 | [done/m10-audio.md](done/m10-audio.md) |
 | M11 | 시작화면(색 선택 중복불가) + 결과창/재대결 | ✅ 완료 | [done/m11-start-result.md](done/m11-start-result.md) |
 | M12 | 마감/통합/ACCEPTANCE 검증 | ✅ 완료 | [done/m12-finish.md](done/m12-finish.md) |
+| M13 | 미사일 연기 트레일 | ✅ 완료 | [done/m13-15-post-launch.md](done/m13-15-post-launch.md) |
+| M14 | 근접 록온 보정 + 조준 보조(aimAssist) | ✅ 완료 | [done/m13-15-post-launch.md](done/m13-15-post-launch.md) |
+| M15 | 낮밤 사이클 + 밤 항법등 | ✅ 완료 | [done/m13-15-post-launch.md](done/m13-15-post-launch.md) |
+| 폴리시 | 경기 타이머·일시정지(ESC)·미사일 근접경보·AI 연습 모드 | ✅ 완료 | [done/m13-15-post-launch.md](done/m13-15-post-launch.md) |

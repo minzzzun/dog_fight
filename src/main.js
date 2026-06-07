@@ -6,7 +6,7 @@
 //   startMatch(c1,c2)로 (재)초기화. 'fighting'일 때만 입력/비행/무기/전투 step.
 import * as THREE from 'three';
 import { splitViewports } from './render/viewport.js';
-import { buildPlane, applyPlaneTransform, setAfterburner } from './render/planeMesh.js';
+import { buildPlane, applyPlaneTransform, setAfterburner, setNavLights } from './render/planeMesh.js';
 import { chaseCameraPose } from './render/chaseCamera.js';
 import { buildTerrain } from './render/terrainMesh.js';
 import { createBulletPool, syncBullets } from './render/bulletMesh.js';
@@ -16,10 +16,12 @@ import { createMarker } from './render/marker.js';
 import { createExplosionPool, spawnExplosion, stepExplosions } from './render/explosion.js';
 import { createSmokePool, emitSmoke, stepSmoke } from './render/smoke.js';
 import { createContrailPool, emitContrail, stepContrail } from './render/contrail.js';
+import { createMissileTrailPool, emitMissileTrail, stepMissileTrail } from './render/missileTrail.js';
 import { createLockReticle } from './render/lockReticle.js';
 import { createHud } from './render/hud.js';
 import { targetIndicator } from './radar.js';
-import { createPlane, stepFlight, forwardOf, rightOf, upOf, MAX_SPEED } from './flight.js';
+import { createPlane, stepFlight, forwardOf, rightOf, upOf, MAX_SPEED,
+  ASSIST_LONG_RATE, ASSIST_STRONG_RANGE, ASSIST_STRONG_CONE, ASSIST_STRONG_RATE } from './flight.js';
 import { createInput, onKeyDown, onKeyUp, readInputs } from './input.js';
 import { createGun, stepGun, stepBullets } from './weapons/gun.js';
 import { createMissileLauncher, stepLock, stepMissiles } from './weapons/missile.js';
@@ -28,6 +30,8 @@ import { createAudio } from './audio.js';
 import { terrainCollision } from './terrain.js';
 import { createCombat, stepCombat, CRASH_MARGIN } from './combat.js';
 import { PLANE_COLORS, colorById, canStart } from './colors.js';
+import { dayNightState } from './daynight.js';
+import { computeAIInput } from './ai.js';
 
 // ══════════════════════════════════════════════════════════════ 상수
 const FOV = 75, NEAR = 0.1, FAR = 5000, DELTA_CLAMP = 0.05;
@@ -43,10 +47,16 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(SKY_COLOR);
 scene.fog = new THREE.Fog(SKY_COLOR, 1500, 4500);
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x335577, 1.0));
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x335577, 1.0);
+scene.add(hemiLight);
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
 dirLight.position.set(200, 400, 100);
 scene.add(dirLight);
+let worldTime = 0;   // 매치 경과 시간(초) — startMatch에서 0(낮)으로 리셋, fighting 중 누적
+// 장거리 조준 보조 — 마지막 록온 이후 이 시간(초) 동안 아무도 록온을 못 잡으면
+//   거리·콘 제한을 풀어(전방향·무제한) 양 기체를 천천히 서로 향하게 해 재교전을 유도.
+const NO_LOCK_ASSIST_TIME = 30;
+let noLockTimer = 0;   // 마지막 록온 이후 경과(초)
 
 scene.add(buildTerrain());
 
@@ -57,6 +67,7 @@ const flarePool = createFlarePool(scene);
 const explosionPool = createExplosionPool(scene);
 const smokePool = createSmokePool(scene);
 const contrailPool = createContrailPool(scene);
+const missileTrailPool = createMissileTrailPool(scene);
 const markerP1 = createMarker(scene, 0x2266ff);
 const markerP2 = createMarker(scene, 0xff3322);
 markerP1.group.visible = false;
@@ -122,6 +133,8 @@ function startMatch(c1hex, c2hex) {
   combat = createCombat();
   prevAlive = [true, true];
 
+  worldTime = 0;   // 매치는 낮부터 시작
+  noLockTimer = 0;
   sessionState = 'fighting';
   audio.resume();
 }
@@ -136,8 +149,11 @@ function clearMatch() {
 // ══════════════════════════════════════════════════════════════ 시작화면 UI
 const startOverlay = document.getElementById('start-overlay');
 const resultOverlay = document.getElementById('result-overlay');
+const pauseOverlay = document.getElementById('pause-overlay');
 const resultTitle = document.getElementById('result-title');
 const startBtn = document.getElementById('start-btn');
+const aiToggle = document.getElementById('ai-toggle');
+let aiEnabled = false;   // AI 연습 모드 — P2를 봇이 조종
 const selected = [null, null];  // 각 플레이어가 고른 color id
 
 function buildSwatches(containerId, playerIdx) {
@@ -166,11 +182,19 @@ function refreshSwatches() {
       sw.classList.toggle('disabled', selected[1 - p] === id);  // 상대 선택색 비활성
     }
   }
-  startBtn.disabled = !canStart(selected[0], selected[1]);
+  // AI 모드면 P1만 고르면 시작 가능(P2는 자동색), 아니면 둘 다 + 중복불가
+  startBtn.disabled = aiToggle.checked ? selected[0] == null : !canStart(selected[0], selected[1]);
+}
+
+// AI 모드 P2 자동 색 — P1이 고른 색과 다른 첫 색.
+function autoAiColorHex(p1Id) {
+  const c = PLANE_COLORS.find((pc) => pc.id !== p1Id) ?? PLANE_COLORS[0];
+  return c.hex;
 }
 
 function showStartScreen() {
   clearMatch();
+  hud.hideTimer();
   sessionState = 'select';
   resultOverlay.classList.add('hidden');
   startOverlay.classList.remove('hidden');
@@ -179,12 +203,24 @@ function showStartScreen() {
 
 buildSwatches('p1-colors', 0);
 buildSwatches('p2-colors', 1);
+const picker = document.querySelector('.picker');
+aiToggle.addEventListener('change', () => {
+  picker.classList.toggle('ai-on', aiToggle.checked);  // P2 칸 비활성 표시
+  refreshSwatches();
+});
 refreshSwatches();
 
 startBtn.addEventListener('click', () => {
-  if (!canStart(selected[0], selected[1])) return;
-  startOverlay.classList.add('hidden');
-  startMatch(colorById(selected[0]).hex, colorById(selected[1]).hex);
+  aiEnabled = aiToggle.checked;
+  if (aiEnabled) {
+    if (selected[0] == null) return;
+    startOverlay.classList.add('hidden');
+    startMatch(colorById(selected[0]).hex, autoAiColorHex(selected[0]));
+  } else {
+    if (!canStart(selected[0], selected[1])) return;
+    startOverlay.classList.add('hidden');
+    startMatch(colorById(selected[0]).hex, colorById(selected[1]).hex);
+  }
 });
 
 document.getElementById('rematch-btn').addEventListener('click', () => {
@@ -192,6 +228,30 @@ document.getElementById('rematch-btn').addEventListener('click', () => {
   startMatch(lastColors[0], lastColors[1]);  // 같은 색 재대결
 });
 document.getElementById('recolor-btn').addEventListener('click', showStartScreen);
+
+// ── 일시정지(ESC) — 'fighting' ↔ 'paused' 토글 ───────────────────────
+function pauseGame() {
+  if (sessionState !== 'fighting') return;
+  sessionState = 'paused';            // animate가 stepFight·worldTime 진행을 멈춤(렌더는 계속)
+  input.down.clear();                 // 눌린 키 해제(재개 시 안 끌리게)
+  pauseOverlay.classList.remove('hidden');
+  audio.suspend();
+}
+function resumeGame() {
+  if (sessionState !== 'paused') return;
+  pauseOverlay.classList.add('hidden');
+  sessionState = 'fighting';
+  audio.resume();
+}
+document.getElementById('resume-btn').addEventListener('click', resumeGame);
+document.getElementById('restart-btn').addEventListener('click', () => {
+  pauseOverlay.classList.add('hidden');
+  startMatch(lastColors[0], lastColors[1]);   // 같은 색 재시작(낮·타이머 0)
+});
+document.getElementById('pause-recolor-btn').addEventListener('click', () => {
+  pauseOverlay.classList.add('hidden');
+  showStartScreen();
+});
 
 function showResult(winner) {
   resultTitle.textContent = winner === 0 ? 'P1 승리' : winner === 1 ? 'P2 승리' : '무승부';
@@ -201,6 +261,13 @@ function showResult(winner) {
 
 // ══════════════════════════════════════════════════════════════ 입력 결선
 window.addEventListener('keydown', (e) => {
+  if (e.code === 'Escape') {        // ESC: 대결 중 일시정지 토글
+    if (sessionState === 'fighting') pauseGame();
+    else if (sessionState === 'paused') resumeGame();
+    e.preventDefault();
+    return;
+  }
+  if (sessionState === 'paused') return;  // 일시정지 중엔 조종 입력 무시
   audio.resume();
   if (e.code === 'Backquote') audio.toggleMute();  // ` 음소거 (M은 P2 플레어)
   if (onKeyDown(input, e.code)) e.preventDefault();
@@ -257,11 +324,25 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), DELTA_CLAMP);
 
-  if (sessionState === 'fighting') stepFight(dt);
+  if (sessionState === 'fighting') {
+    worldTime += dt;   // 시간대 진행은 대결 중에만(시작화면/결과창은 낮 고정)
+    stepFight(dt);
+  }
+
+  // 낮밤 사이클 — 하늘/안개 색 + 조명 세기·색, 밤이면 양 기체 항법등 점등
+  const sun = dayNightState(worldTime);
+  scene.background.setRGB(sun.sky.r, sun.sky.g, sun.sky.b);
+  scene.fog.color.setRGB(sun.sky.r, sun.sky.g, sun.sky.b);
+  hemiLight.intensity = sun.hemiIntensity;
+  dirLight.intensity = sun.dirIntensity;
+  dirLight.color.setRGB(sun.dirColor.r, sun.dirColor.g, sun.dirColor.b);
+  if (meshP1) setNavLights(meshP1, sun.isNight);
+  if (meshP2) setNavLights(meshP2, sun.isNight);
 
   stepExplosions(explosionPool, dt);
   stepSmoke(smokePool, dt);
   stepContrail(contrailPool, dt);
+  stepMissileTrail(missileTrailPool, dt);
 
   // 타격감/FOV 타이머 감쇠
   shake[0] = Math.max(0, shake[0] - dt * 4);
@@ -285,12 +366,18 @@ function animate() {
     // 저체력 정도(0~1) — FOV 축소·붉은 비네트 강도
     const dmg0 = Math.max(0, Math.min(1, (LOW_HP - combat.players[0].hp) / LOW_HP));
     const dmg1 = Math.max(0, Math.min(1, (LOW_HP - combat.players[1].hp) / LOW_HP));
+    // 미사일 근접경보 — 나를 추적 중(decoy 안 된)인 적 미사일이 공중에 있으면 true
+    const incoming0 = missiles.some((m) => m.target === 0 && !m.decoyed);
+    const incoming1 = missiles.some((m) => m.target === 1 && !m.decoyed);
     hud.update(
-      { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1, hp: combat.players[0].hp, lockedBy: lockedBy0, bounds: plane1.warning, speed: plane1.speed, alt: plane1.y, hitMarker: hitFlash[0] > 0, damage: dmg0 },
-      { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2, hp: combat.players[1].hp, lockedBy: lockedBy1, bounds: plane2.warning, speed: plane2.speed, alt: plane2.y, hitMarker: hitFlash[1] > 0, damage: dmg1 },
+      { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1, hp: combat.players[0].hp, lockedBy: lockedBy0, bounds: plane1.warning, speed: plane1.speed, alt: plane1.y, hitMarker: hitFlash[0] > 0, damage: dmg0, missileIncoming: incoming0 },
+      { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2, hp: combat.players[1].hp, lockedBy: lockedBy1, bounds: plane2.warning, speed: plane2.speed, alt: plane2.y, hitMarker: hitFlash[1] > 0, damage: dmg1, missileIncoming: incoming1 },
       dt,
+      worldTime,   // 경기 타이머(중앙 상단 mm:ss)
     );
     audio.lockWarn(lockedBy0.locked || lockedBy0.locking || lockedBy1.locked || lockedBy1.locking);
+    audio.missileAlert(incoming0 || incoming1);  // 미사일 추적 중 경보음
+    audio.missileFlight(missiles.length > 0);   // 공중에 미사일 있으면 비행음
     audio.update({ speed: Math.max(plane1.speed, plane2.speed) }, dt);
 
     // FOV — 저체력=축소(터널비전), 아니면 부스터=확대 / 기본
@@ -317,9 +404,17 @@ function animate() {
 
 // 한 프레임 전투 적분(입력→비행→무기→전투). 'fighting' 일 때만 호출.
 function stepFight(dt) {
-  const { p1, p2 } = readInputs(input);
+  const inputs = readInputs(input);   // 두 플레이어 입력 읽기(엣지 소비)
   const a0 = combat.players[0].alive;
   const a1 = combat.players[1].alive;
+  const p1 = inputs.p1;
+  // AI 모드면 P2 입력을 봇이 생성(상대=P1). incoming/locked는 직전 프레임 상태로 판단.
+  const p2 = aiEnabled
+    ? computeAIInput(plane2, { x: plane1.x, y: plane1.y, z: plane1.z, alive: a0 }, {
+        incoming: missiles.some((m) => m.target === 1 && !m.decoyed),
+        locked: launcher2.locked,
+      })
+    : inputs.p2;
 
   // 데미지 상태: 저체력이면 조향/피치 둔화 + 부스터 불가(기동 둔화)
   const low0 = combat.players[0].hp < LOW_HP;
@@ -327,8 +422,22 @@ function stepFight(dt) {
   const ip1 = low0 ? { ...p1, pitch: p1.pitch * SLUGGISH, roll: p1.roll * SLUGGISH, boost: false } : p1;
   const ip2 = low1 ? { ...p2, pitch: p2.pitch * SLUGGISH, roll: p2.roll * SLUGGISH, boost: false } : p2;
 
-  if (a0) plane1 = stepFlight(plane1, ip1, dt);
-  if (a1) plane2 = stepFlight(plane2, ip2, dt);
+  // 조준 보조 대상 = 살아있는 상대 위치(없으면 null)
+  const aim1 = a1 ? { x: plane2.x, y: plane2.y, z: plane2.z } : null;
+  const aim2 = a0 ? { x: plane1.x, y: plane1.y, z: plane1.z } : null;
+  // 마지막 록온(직전 프레임 기준) 이후 무록온 시간 누적 → 30초 넘으면 장거리 보조 on
+  const anyLocked = (launcher1 && launcher1.locked) || (launcher2 && launcher2.locked);
+  noLockTimer = anyLocked ? 0 : noLockTimer + dt;
+  const longActive = noLockTimer >= NO_LOCK_ASSIST_TIME;
+  const longOpts = { range: Infinity, cone: Math.PI, rate: ASSIST_LONG_RATE };   // 전방향·무제한·완만
+  // AI 연습 모드면 사람(P1)에게 강한 보조(더 멀리·넓게·빠르게). 봇(P2)은 기본 보조.
+  const strongOpts = { range: ASSIST_STRONG_RANGE, cone: ASSIST_STRONG_CONE, rate: ASSIST_STRONG_RATE };
+  const opts1 = aiEnabled
+    ? (longActive ? { range: Infinity, cone: Math.PI, rate: ASSIST_STRONG_RATE } : strongOpts)
+    : (longActive ? longOpts : null);
+  const opts2 = longActive ? longOpts : null;
+  if (a0) plane1 = stepFlight(plane1, ip1, dt, aim1, opts1);
+  if (a1) plane2 = stepFlight(plane2, ip2, dt, aim2, opts2);
 
   abPhase += dt;
   setAfterburner(meshP1, a0 && ip1.boost, abPhase);
@@ -394,6 +503,12 @@ function stepFight(dt) {
 
   const steppedM = stepMissiles(missiles, dt, targets, flares, bulletTerrain);
   missiles = steppedM.missiles;
+  // 미사일 연기 트레일 — 각 미사일 꼬리(속도 반대 방향)에서 매 프레임 퍼프 방출
+  for (const m of missiles) {
+    const sp = Math.hypot(m.vx, m.vy, m.vz) || 1;
+    const bx = m.x - (m.vx / sp) * 5, by = m.y - (m.vy / sp) * 5, bz = m.z - (m.vz / sp) * 5;
+    emitMissileTrail(missileTrailPool, bx, by, bz);
+  }
   for (const h of steppedM.hits) {
     if (h.position) { spawnExplosion(explosionPool, h.position.x, h.position.y, h.position.z, false); audio.explosion(false); }
   }

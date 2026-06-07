@@ -7,8 +7,10 @@
 import { describe, it, expect } from 'vitest';
 import {
   createPlane, stepFlight, forwardOf, upOf, rightOf, moveToward, wrapAngle,
+  aimAssist,
   BASE_SPEED, BOOST_SPEED, BRAKE_SPEED, MIN_SPEED, MAX_SPEED, ACCEL, DECEL,
-  SPAWN_Y, WORLD_HALF, CEILING, FLOOR,
+  SPAWN_Y, WORLD_HALF, CEILING, FLOOR, ASSIST_RANGE, ASSIST_CONE,
+  ASSIST_STRONG_RANGE, ASSIST_STRONG_CONE, ASSIST_STRONG_RATE,
 } from './flight.js';
 
 const input = (o = {}) => ({ pitch: 0, roll: 0, boost: false, brake: false, ...o });
@@ -204,5 +206,125 @@ describe('불변성/결정론', () => {
     const a = stepFlight(p, input({ pitch: 0.5, roll: -0.3, boost: true }), 0.05);
     const b = stepFlight(p, input({ pitch: 0.5, roll: -0.3, boost: true }), 0.05);
     expect(a).toEqual(b);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+describe('근접 조준 보조 (aimAssist)', () => {
+  // forward 와 (target-pos) 사이 각(rad)
+  const angleTo = (fwd, pos, t) => {
+    const d = { x: t.x - pos.x, y: t.y - pos.y, z: t.z - pos.z };
+    const ld = len(d) || 1, lf = len(fwd) || 1;
+    let c = (fwd.x * d.x + fwd.y * d.y + fwd.z * d.z) / (ld * lf);
+    c = c < -1 ? -1 : c > 1 ? 1 : c;
+    return Math.acos(c);
+  };
+
+  it('범위·콘 안 상대 → 기수가 상대 쪽으로 당겨짐(보조 없을 때보다 각 감소)', () => {
+    const p = createPlane();                       // 정면 (0,0,-1), 위치 (0,300,0)
+    const tgt = { x: 150, y: 300, z: -300 };       // 우전방, dist≈335<700, 콘 안
+    const assisted = stepFlight(p, input(), 0.1, tgt);
+    const plain = stepFlight(p, input(), 0.1);     // 동일 입력, 보조 없음
+    expect(angleTo(forwardOf(assisted), assisted, tgt))
+      .toBeLessThan(angleTo(forwardOf(plain), plain, tgt));
+    expect(forwardOf(assisted).x).toBeGreaterThan(forwardOf(plain).x); // 우측(상대)으로 선회
+  });
+
+  it('ASSIST_RANGE 밖 상대 → 보조 없음(보조 없을 때와 동일)', () => {
+    const p = createPlane();
+    const tgt = { x: 300, y: 300, z: -900 };       // dist≈948>700
+    const assisted = stepFlight(p, input(), 0.1, tgt);
+    const plain = stepFlight(p, input(), 0.1);
+    expect(forwardOf(assisted)).toEqual(forwardOf(plain));
+  });
+
+  it('정면 콘 밖(상대가 후방) → 보조 없음', () => {
+    const p = createPlane();
+    const tgt = { x: 0, y: 300, z: 300 };          // 정후방 180°
+    const assisted = stepFlight(p, input(), 0.1, tgt);
+    const plain = stepFlight(p, input(), 0.1);
+    expect(forwardOf(assisted)).toEqual(forwardOf(plain));
+  });
+
+  it('aimAssist: null 타깃이면 q 그대로', () => {
+    const p = createPlane();
+    expect(aimAssist(p.q, p, null, 0.1)).toEqual(p.q);
+  });
+
+  it('aimAssist: 큰 dt여도 목표각을 넘겨 회전하지 않음(과회전 방지)', () => {
+    const p = createPlane();
+    const tgt = { x: 100, y: 300, z: -100 };       // 콘 안
+    const before = angleTo(forwardOf(p), p, tgt);
+    const q = aimAssist(p.q, p, tgt, 100);          // 비현실적으로 큰 dt
+    const after = angleTo(forwardOf({ q }), p, tgt);
+    expect(after).toBeLessThanOrEqual(before + 1e-9); // 안 넘어감(최대 목표 정렬)
+    expect(after).toBeGreaterThanOrEqual(0);
+  });
+
+  it('상수: ASSIST_CONE는 LOCK 범위보다 넉넉(>=60°), ASSIST_RANGE 양수', () => {
+    expect(ASSIST_CONE).toBeGreaterThanOrEqual(Math.PI / 180 * 60);
+    expect(ASSIST_RANGE).toBeGreaterThan(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+describe('장거리 조준 보조 (aimAssist 무제한·전방향)', () => {
+  const angleTo = (fwd, pos, t) => {
+    const d = { x: t.x - pos.x, y: t.y - pos.y, z: t.z - pos.z };
+    const ld = len(d) || 1, lf = len(fwd) || 1;
+    let c = (fwd.x * d.x + fwd.y * d.y + fwd.z * d.z) / (ld * lf);
+    c = c < -1 ? -1 : c > 1 ? 1 : c;
+    return Math.acos(c);
+  };
+  const LONG = [Infinity, Math.PI, 0.6]; // range, cone, rate
+
+  it('기본 보조 범위(700m) 밖 먼 상대도 무제한 모드면 기수가 향해짐', () => {
+    const p = createPlane();
+    const tgt = { x: 800, y: 300, z: -1500 };   // 1700m+ (기본 ASSIST_RANGE 밖)
+    const q = aimAssist(p.q, p, tgt, 0.1, ...LONG);
+    expect(angleTo(forwardOf({ q }), p, tgt)).toBeLessThan(angleTo(forwardOf(p), p, tgt));
+  });
+
+  it('정후방(180°) 상대도 전방향 모드면 회전축 퇴화 없이 돌기 시작', () => {
+    const p = createPlane();                      // forward (0,0,-1)
+    const tgt = { x: 0, y: 300, z: 2000 };        // 정후방
+    const q = aimAssist(p.q, p, tgt, 0.1, ...LONG);
+    // 한 스텝에 살짝이라도 자세가 바뀌어야(퇴화로 멈추지 않음)
+    expect(Math.abs(q.x - p.q.x) + Math.abs(q.y - p.q.y) + Math.abs(q.z - p.q.z) + Math.abs(q.w - p.q.w))
+      .toBeGreaterThan(1e-6);
+  });
+
+  it('stepFlight assistOpts로 무제한 보조 전달 시 먼 상대로 선회', () => {
+    const p = createPlane();
+    const tgt = { x: 900, y: 300, z: -900 };      // ~1270m, 기본 범위 밖
+    const a = stepFlight(p, input(), 0.1, tgt, { range: Infinity, cone: Math.PI, rate: 0.6 });
+    const plain = stepFlight(p, input(), 0.1, tgt); // 기본(범위 밖이라 보조 없음)
+    expect(angleTo(forwardOf(a), a, tgt)).toBeLessThan(angleTo(forwardOf(plain), plain, tgt));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+describe('강화 조준 보조 (AI 모드 사람 플레이어)', () => {
+  const angleTo = (fwd, pos, t) => {
+    const d = { x: t.x - pos.x, y: t.y - pos.y, z: t.z - pos.z };
+    const ld = len(d) || 1, lf = len(fwd) || 1;
+    let c = (fwd.x * d.x + fwd.y * d.y + fwd.z * d.z) / (ld * lf);
+    c = c < -1 ? -1 : c > 1 ? 1 : c;
+    return Math.acos(c);
+  };
+
+  it('강화 상수: 기본보다 멀고·넓고·빠르다', () => {
+    expect(ASSIST_STRONG_RANGE).toBeGreaterThan(ASSIST_RANGE);
+    expect(ASSIST_STRONG_CONE).toBeGreaterThan(ASSIST_CONE);
+    expect(ASSIST_STRONG_RATE).toBeGreaterThan(1.0);
+  });
+
+  it('기본 범위(700m) 밖이라도 강화 범위(1400m) 안이면 기수가 향해짐', () => {
+    const p = createPlane();
+    const tgt = { x: 400, y: 300, z: -1000 };   // ~1077m: 기본 밖, 강화 안
+    const strong = stepFlight(p, input(), 0.1, tgt,
+      { range: ASSIST_STRONG_RANGE, cone: ASSIST_STRONG_CONE, rate: ASSIST_STRONG_RATE });
+    const plain = stepFlight(p, input(), 0.1, tgt);   // 기본(범위 밖→보조 없음)
+    expect(angleTo(forwardOf(strong), strong, tgt)).toBeLessThan(angleTo(forwardOf(plain), plain, tgt));
   });
 });

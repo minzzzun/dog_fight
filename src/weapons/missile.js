@@ -13,10 +13,16 @@ import { forwardOf } from '../flight.js';
 // 보유/락온
 export const MISSILE_AMMO  = 2;              // 플레이어당 보유 미사일 수
 export const LOCK_TIME      = 2;             // 락온 누적 소요(초)
-export const LOCK_CONE      = Math.PI / 180 * 15;  // 락 콘 반각(rad) ≈ 15° ≈ 0.262
-export const MIN_RANGE      = 150;          // 최소 사거리(m) — 이보다 가까우면 락/발사 불가
+export const LOCK_CONE      = Math.PI / 180 * 15;  // 락 콘 반각(rad) ≈ 15° ≈ 0.262 — 원거리 기준
+export const MIN_RANGE      = 40;           // 최소 사거리(m) — 근접 도그파이트 허용(이보다 가까우면 락 불가)
 export const MAX_RANGE      = 2000;         // 최대 사거리(m) — 이보다 멀면 락/발사 불가
 export const MISSILE_DAMAGE = 50;           // 1발 명중당 데미지
+
+// 근접 록온 보정 — 가까울수록 락 콘을 넓혀 근접전에서 서로 놓치지 않게 한다.
+//   거리 ≤ NEAR_RANGE 면 콘 반각 = LOCK_CONE_NEAR, 거리 ≥ FAR_RANGE 면 = LOCK_CONE, 그 사이 선형 보간.
+export const LOCK_CONE_NEAR = Math.PI / 180 * 45;  // 근접 시 락 콘 반각 ≈ 45°
+export const NEAR_RANGE      = MIN_RANGE;    // 이 거리 이하에서 콘 최대(가장 넓음)
+export const FAR_RANGE       = 500;          // 이 거리 이상에서 콘 기본(LOCK_CONE)
 
 // 미사일 비행 — 가속 모델: 발사 직후 기체보다 살짝 빠른 속도에서 시작해 점점 가속.
 export const MISSILE_INIT_SPEED = 150;      // 발사 직후 속도(m/s) — 기체 base(120)보다 약간 빠름
@@ -106,21 +112,30 @@ function terrainHit(terrain, x, y, z) {
   return false;
 }
 
+// 거리에 따른 유효 락 콘 반각(rad). 가까울수록 넓다(근접 보정).
+//   dist ≤ NEAR_RANGE → LOCK_CONE_NEAR, dist ≥ FAR_RANGE → LOCK_CONE, 그 사이 선형 보간.
+export function effectiveLockCone(dist) {
+  if (dist <= NEAR_RANGE) return LOCK_CONE_NEAR;
+  if (dist >= FAR_RANGE) return LOCK_CONE;
+  const t = (dist - NEAR_RANGE) / (FAR_RANGE - NEAR_RANGE);  // 0(근접)~1(원거리)
+  return LOCK_CONE_NEAR + (LOCK_CONE - LOCK_CONE_NEAR) * t;
+}
+
 // ── 락 가능 판정 (콘 + 사거리) ───────────────────────────────────────
 //
-// 정면 콘(forward와 (target-shooter) 사이 각 ≤ LOCK_CONE) AND 거리 ∈ [MIN_RANGE, MAX_RANGE].
-// 죽은/null 타깃은 false. 순수·결정론.
+// 정면 콘(forward와 (target-shooter) 사이 각 ≤ effectiveLockCone(거리)) AND 거리 ∈ [MIN_RANGE, MAX_RANGE].
+// 콘은 가까울수록 넓어진다(근접전 보정). 죽은/null 타깃은 false. 순수·결정론.
 export function canLock(shooter, target) {
   if (!target || target.alive === false) return false;
   const dx = target.x - shooter.x, dy = target.y - shooter.y, dz = target.z - shooter.z;
   const d2 = dx * dx + dy * dy + dz * dz;
   // (a) 사거리: [MIN_RANGE, MAX_RANGE] (제곱 비교로 sqrt 회피)
   if (d2 < MIN_RANGE * MIN_RANGE || d2 > MAX_RANGE * MAX_RANGE) return false;
-  // (b) 콘: forward 와 (target-shooter) 사이 각도 ≤ LOCK_CONE ⇔ cos ≥ cos(LOCK_CONE)
+  // (b) 콘: forward 와 (target-shooter) 사이 각도 ≤ 유효콘 ⇔ cos ≥ cos(유효콘)
   const f = forwardOf(shooter);          // 단위벡터(yaw/pitch만, 롤 무관)
   const len = Math.sqrt(d2) || 1;
   const cos = (f.x * dx + f.y * dy + f.z * dz) / len;
-  return cos >= Math.cos(LOCK_CONE);
+  return cos >= Math.cos(effectiveLockCone(len));
 }
 
 // ── 생성 ─────────────────────────────────────────────────────────────

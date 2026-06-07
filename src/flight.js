@@ -22,6 +22,22 @@ export const PITCH_RATE  = 1.2;   // 피치 입력 최대 시 각속도(rad/s)
 export const ROLL_RATE   = 2.4;   // 롤 입력 최대 시 각속도(rad/s)
 export const YAW_FROM_ROLL = 1.0; // 뱅크턴 계수: 뱅크 정도 → 선회율
 
+// 근접 조준 보조(aim assist) — 상대가 가까이·정면 콘 안에 있으면 기수를 상대 쪽으로
+//   부드럽게 당겨준다. 가속/감속을 무제한으로 쓰는 근접전에서 서로를 놓치지 않게 보조.
+//   플레이어 조작 권한(PITCH_RATE 등)보다 약하게 둬 "자동조준"이 아닌 "보조"가 되게 한다.
+export const ASSIST_RANGE = 700;  // 이 거리 이내에서만 작동(m)
+export const ASSIST_CONE  = Math.PI / 180 * 80; // 기수 기준 이 반각 안에 상대가 있을 때만(rad)
+export const ASSIST_RATE  = 1.0;  // 점근접 시 최대 보정 각속도(rad/s) — 거리에 비례해 약해짐
+
+// 장거리 보조 — 오래 교전이 없을 때(서로 멀리 떨어져 못 찾는 상황) 거리·콘 제한을 풀어
+//   기수를 상대 쪽으로 천천히 돌려 재교전을 유도한다(범위 무제한·전방향·약한 강도).
+export const ASSIST_LONG_RATE = 0.6;  // 장거리 보조 각속도(rad/s) — 일정·완만
+
+// 강화 보조 — AI 연습 모드에서 사람 플레이어에게 주는 강한 조준 도움(더 멀리·더 넓게·더 빠르게).
+export const ASSIST_STRONG_RANGE = 1400;          // 작동 거리(m)
+export const ASSIST_STRONG_CONE  = Math.PI / 180 * 110; // 작동 반각(rad) — 측후방까지
+export const ASSIST_STRONG_RATE  = 1.8;           // 보정 각속도(rad/s) — 강하게 끌어줌
+
 export const WORLD_HALF   = 2000; // 중심 0 기준 ±2000m (x,z)
 export const CEILING      = 1500;
 export const FLOOR        = 0;
@@ -131,8 +147,46 @@ function isWarning(x, z) {
   return Math.abs(x) > inner || Math.abs(z) > inner;
 }
 
+// ── 조준 보조 ────────────────────────────────────────────────────────
+// 현재 자세 q(월드)와 위치 pos에서, 상대 위치 target 쪽으로 기수를 당기는 보정을 적용한
+// 새 쿼터니언을 반환.
+//   range: 작동 거리 상한(m). Infinity면 거리 무제한(장거리 보조).
+//   cone : 기수 기준 작동 반각(rad). Math.PI면 전방향(뒤쪽 상대도 천천히 돌아봄).
+//   rate : 최대 보정 각속도(rad/s). 유한 range에선 거리에 비례해 약해지고, Infinity면 일정.
+// 한 스텝에 목표각을 넘기지 않음(과회전 방지). 조건 불충족이면 q를 그대로 반환(순수).
+export function aimAssist(q, pos, target, dt, range = ASSIST_RANGE, cone = ASSIST_CONE, rate = ASSIST_RATE) {
+  if (!target) return q;
+  const dx = target.x - pos.x, dy = target.y - pos.y, dz = target.z - pos.z;
+  const dist = Math.hypot(dx, dy, dz);
+  if (dist <= 1e-3 || dist > range) return q;
+
+  const f = qRotate(q, { x: 0, y: 0, z: -1 });      // 현재 기수 방향
+  const dxn = dx / dist, dyn = dy / dist, dzn = dz / dist;
+  let cos = f.x * dxn + f.y * dyn + f.z * dzn;
+  cos = cos < -1 ? -1 : cos > 1 ? 1 : cos;
+  const ang = Math.acos(cos);
+  if (ang <= 1e-4 || ang > cone) return q;           // 이미 정조준이거나 콘 밖 → 보조 없음
+
+  // 최소 회전축 = forward × desired (월드 공간)
+  let ax = f.y * dzn - f.z * dyn;
+  let ay = f.z * dxn - f.x * dzn;
+  let az = f.x * dyn - f.y * dxn;
+  let al = Math.hypot(ax, ay, az);
+  if (al < 1e-6) {                       // 정후방(180°) 등 퇴화 → 임의 수직축(월드 up×forward)
+    ax = -f.z; ay = 0; az = f.x;         // up(0,1,0) × forward
+    al = Math.hypot(ax, ay, az) || 1;
+  }
+  ax /= al; ay /= al; az /= al;
+
+  const proximity = Number.isFinite(range) ? 1 - dist / range : 1;  // 유한 range만 거리 비례
+  const step = Math.min(ang, rate * proximity * dt);  // 과회전 방지
+  return qMul(qAxisAngle(ax, ay, az, step), q);       // 월드축 회전 → pre-multiply
+}
+
 // ── 한 스텝 적분 ─────────────────────────────────────────────────────
-export function stepFlight(state, input, dt) {
+// assistTarget: 상대 위치 {x,y,z} 또는 null. 주면 조준 보조를 적용한다.
+// assistOpts: { range, cone, rate } 보조 파라미터 오버라이드(없으면 근접 기본값). 장거리 보조용.
+export function stepFlight(state, input, dt, assistTarget = null, assistOpts = null) {
   // (a) 속도 — 목표속도로 가감속(brake 우선)
   const target = input.brake ? BRAKE_SPEED : input.boost ? BOOST_SPEED : BASE_SPEED;
   const rate = target < state.speed ? DECEL : ACCEL;
@@ -150,6 +204,10 @@ export function stepFlight(state, input, dt) {
   const r = qRotate(q, { x: 1, y: 0, z: 0 });
   const turn = YAW_FROM_ROLL * r.y * dt;       // r.y<0 → turn<0 → 우선회
   q = qMul(qAxisAngle(0, 1, 0, turn), q);
+
+  // (c-2) 조준 보조 — 상대가 가까이·정면이면(또는 장거리 보조 시 전방향) 기수를 상대 쪽으로 당김
+  q = aimAssist(q, state, assistTarget, dt,
+    assistOpts?.range ?? ASSIST_RANGE, assistOpts?.cone ?? ASSIST_CONE, assistOpts?.rate ?? ASSIST_RATE);
 
   // (d) 경계 강제선회 — 현재 heading(수평) 기준
   const fwd0 = qRotate(q, { x: 0, y: 0, z: -1 });

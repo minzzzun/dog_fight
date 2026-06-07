@@ -108,6 +108,18 @@ function makeWarn(leftPercent) {
   return el;
 }
 
+// ── 미사일 근접경보(각 절반, 피락온 경고보다 다급) ───────────────────
+function makeMissileWarn(leftPercent) {
+  const el = document.createElement('div');
+  el.style.cssText =
+    'position:fixed;top:38%;left:' + leftPercent + '%;transform:translate(-50%,-50%);' +
+    'color:#ff2a2a;font-family:system-ui,monospace;font-weight:900;font-size:30px;' +
+    'text-shadow:0 2px 6px rgba(0,0,0,0.95);pointer-events:none;z-index:13;display:none';
+  el.textContent = '🚀 미사일! 회피!';
+  document.body.appendChild(el);
+  return el;
+}
+
 // ── 경계 이탈 경고(각 절반 상단, 경고들 위) ──────────────────────────
 function makeBounds(leftPercent) {
   const el = document.createElement('div');
@@ -131,6 +143,25 @@ function makeVignette(isLeft) {
   return el;
 }
 
+// ── 경기 타이머(화면 중앙 상단, 양 뷰 공통) ──────────────────────────
+function makeTimer() {
+  const el = document.createElement('div');
+  el.style.cssText =
+    'position:fixed;top:14px;left:50%;transform:translateX(-50%);' +
+    'font-family:system-ui,monospace;font-weight:800;font-size:26px;color:#fff;' +
+    'letter-spacing:1px;text-shadow:0 2px 5px rgba(0,0,0,0.9);' +
+    'pointer-events:none;z-index:20;display:none';
+  document.body.appendChild(el);
+  return el;
+}
+
+function fmtTime(sec) {
+  const t = Math.max(0, Math.floor(sec));
+  const m = Math.floor(t / 60);
+  const s = t % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 // ── 중앙 조준점 ──────────────────────────────────────────────────────
 function makeCrosshair(leftPercent) {
   const el = document.createElement('div');
@@ -150,12 +181,15 @@ export function createHud() {
   const arrowR = makeArrow(75);
   const warnL = makeWarn(25);
   const warnR = makeWarn(75);
+  const mWarnL = makeMissileWarn(25);
+  const mWarnR = makeMissileWarn(75);
   const boundsL = makeBounds(25);
   const boundsR = makeBounds(75);
   const crossL = makeCrosshair(25);
   const crossR = makeCrosshair(75);
   const vigL = makeVignette(true);
   const vigR = makeVignette(false);
+  const timerEl = makeTimer();
   let blink = 0;
 
   function renderStatus(s, state) {
@@ -201,14 +235,24 @@ export function createHud() {
     }
   }
 
-  function update(p1, p2, dt = 0) {
+  function update(p1, p2, dt = 0, matchTime = null) {
     blink = (blink + dt) % 1;
+    // 경기 타이머 — 숫자가 오면 mm:ss 표시, 아니면 숨김
+    if (typeof matchTime === 'number') {
+      timerEl.style.display = 'block';
+      timerEl.textContent = fmtTime(matchTime);
+    } else {
+      timerEl.style.display = 'none';
+    }
     renderStatus(statusL, p1);
     renderStatus(statusR, p2);
     renderArrow(arrowL, p1);
     renderArrow(arrowR, p2);
     renderWarn(warnL, p1);
     renderWarn(warnR, p2);
+    // 미사일 근접경보 — 깜빡이며 표시(피락온보다 다급)
+    mWarnL.style.display = p1 && p1.missileIncoming && blink < 0.5 ? 'block' : 'none';
+    mWarnR.style.display = p2 && p2.missileIncoming && blink < 0.5 ? 'block' : 'none';
     boundsL.style.display = p1 && p1.bounds ? 'block' : 'none';
     boundsR.style.display = p2 && p2.bounds ? 'block' : 'none';
     // 히트마커 — 내가 상대를 맞히면 조준점 빨강 플래시
@@ -219,5 +263,7 @@ export function createHud() {
     vigR.style.opacity = p2 && p2.damage ? String(Math.min(0.85, p2.damage)) : '0';
   }
 
-  return { update };
+  function hideTimer() { timerEl.style.display = 'none'; }
+
+  return { update, hideTimer };
 }

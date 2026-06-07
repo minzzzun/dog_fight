@@ -9,6 +9,7 @@
 export const ENGINE_FREQ_MIN = 70;     // 엔진 험 최저 주파수(Hz)
 export const ENGINE_FREQ_MAX = 200;    // 최고
 export const LOCK_BEEP_INTERVAL = 0.4; // 피락온 경고 beep 주기(s)
+export const MISSILE_ALERT_INTERVAL = 0.22; // 미사일 근접경보 beep 주기(s, 더 다급)
 export const GUN_MIN_INTERVAL = 0.05;  // 기관총 연사 게이팅 최소 간격(s)
 
 // 속도 → 엔진 피치(순수, 70~200Hz 선형 clamp).
@@ -22,10 +23,13 @@ export function createAudio(opts = {}) {
 
   let ctx = null;
   let master = null, sfxBus = null, musicBus = null, engineGain = null, engineOsc = null;
+  let missileGain = null;   // 미사일 비행음(루프) 게인 — 공중에 미사일 있으면 on
   let muted = false;
   let lastGunTime = -Infinity;
   let lockOn = false;
   let beepTimer = 0;
+  let missileAlertOn = false;   // 내게 미사일이 날아오는 중
+  let alertTimer = 0;
 
   function resolveCtor() {
     if (AudioContextCtor) return AudioContextCtor;
@@ -61,6 +65,25 @@ export function createAudio(opts = {}) {
     engineOsc.frequency.value = ENGINE_FREQ_MIN;
     engineOsc.connect(lp);
     engineOsc.start();
+
+    // 미사일 비행음 베드: 루프 화이트노이즈 → bandpass → missileGain(0). 공중 미사일 있으면 게인 ↑.
+    missileGain = ctx.createGain();
+    missileGain.gain.value = 0;
+    missileGain.connect(sfxBus);
+    const mbp = ctx.createBiquadFilter();
+    mbp.type = 'bandpass';
+    mbp.frequency.value = 700;     // 로켓 배기 쉭~ 대역
+    mbp.Q.value = 0.8;
+    mbp.connect(missileGain);
+    const nlen = Math.max(1, Math.floor(ctx.sampleRate * 1.0));
+    const nbuf = ctx.createBuffer(1, nlen, ctx.sampleRate);
+    const ndata = nbuf.getChannelData(0);
+    for (let i = 0; i < nlen; i++) ndata[i] = Math.random() * 2 - 1;
+    const nsrc = ctx.createBufferSource();
+    nsrc.buffer = nbuf;
+    nsrc.loop = true;
+    nsrc.connect(mbp);
+    nsrc.start();
 
     // BGM: 절차적 지속 osc(낮은 볼륨). bgmUrl 미주입 시 fetch 안 함.
     const bgmOsc = ctx.createOscillator();
@@ -160,7 +183,16 @@ export function createAudio(opts = {}) {
     if (osc.stop) osc.stop(now() + 1.35);
   }
 
+  // 미사일 비행음 on/off — 공중에 미사일이 하나라도 있으면 on(부드럽게 페이드).
+  function missileFlight(on) {
+    if (!missileGain) return;
+    missileGain.gain.setTargetAtTime(on && !muted ? 0.16 : 0, now(), 0.06);
+  }
+
   function lockWarn(on) { lockOn = !!on; if (!on) beepTimer = 0; }
+
+  // 미사일 근접경보 on/off — 내게 유도미사일이 추적 중일 때 다급한 저음 beep.
+  function missileAlert(on) { missileAlertOn = !!on; if (!on) alertTimer = 0; }
 
   function beep() {
     const osc = ctx.createOscillator();
@@ -172,6 +204,19 @@ export function createAudio(opts = {}) {
     osc.connect(g); g.connect(sfxBus);
     osc.start();
     if (osc.stop) osc.stop(now() + 0.13);
+  }
+
+  // 미사일 경보음 — 락온 beep(880 square)과 구분되는 다급한 저음(330 sawtooth).
+  function alertBeep() {
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = 330;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.3, now());
+    g.gain.exponentialRampToValueAtTime(0.001, now() + 0.14);
+    osc.connect(g); g.connect(sfxBus);
+    osc.start();
+    if (osc.stop) osc.stop(now() + 0.15);
   }
 
   function update(state, dt) {
@@ -187,11 +232,19 @@ export function createAudio(opts = {}) {
         beepTimer -= LOCK_BEEP_INTERVAL;
       }
     }
+    // 미사일 근접경보 beep 게이팅(더 다급)
+    if (missileAlertOn && !muted) {
+      alertTimer += dt;
+      while (alertTimer >= MISSILE_ALERT_INTERVAL) {
+        alertBeep();
+        alertTimer -= MISSILE_ALERT_INTERVAL;
+      }
+    }
   }
 
   return {
     resume, suspend, update,
-    gunShot, missileFire, lockWarn, explosion, death,
+    gunShot, missileFire, missileFlight, lockWarn, missileAlert, explosion, death,
     setMuted, toggleMute,
     get muted() { return muted; },
     get _ctx() { return ctx; },
