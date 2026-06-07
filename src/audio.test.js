@@ -283,6 +283,21 @@ describe('시작 전 안전 + resume idempotent', () => {
       audio.explosion(false);
       audio.lockWarn(true);
       audio.lockWarn(false);
+      audio.missileFlight(true);
+      audio.missileFlight(false);
+      audio.missileAlert(true);
+      audio.missileAlert(false);
+    }).not.toThrow();
+  });
+
+  it('missileFlight/missileAlert: resume 후 on/off + update가 throw 안 함', () => {
+    const audio = createAudio({ AudioContextCtor: FakeAudioContext });
+    audio.resume();
+    expect(() => {
+      audio.missileFlight(true); audio.missileFlight(false);
+      audio.missileAlert(true);
+      audio.update({ speed: 120 }, 0.3);   // 경보 beep 게이팅 경유
+      audio.missileAlert(false);
     }).not.toThrow();
   });
 

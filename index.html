@@ -20,6 +20,7 @@
         <div id="p2-colors" class="swatches"></div>
       </div>
     </div>
+    <label class="ai-toggle"><input type="checkbox" id="ai-toggle" /> 🤖 AI 연습 모드 (P2를 컴퓨터가 조종)</label>
     <button id="start-btn" disabled>시작</button>
     <div class="controls">
       <b>P1</b> WASD 조종 · Shift 부스터 · Q 감속 · E 기관총 · R 미사일 · F 플레어 &nbsp;|&nbsp;
@@ -34,6 +35,21 @@
     <div class="result-btns">
       <button id="rematch-btn">재대결</button>
       <button id="recolor-btn">색 다시 고르기</button>
+    </div>
+  </div>
+
+  <!-- 일시정지 메뉴 (ESC) -->
+  <div id="pause-overlay" class="hidden">
+    <h1>⏸ 일시정지</h1>
+    <div class="result-btns">
+      <button id="resume-btn">재개</button>
+      <button id="restart-btn">재시작</button>
+      <button id="pause-recolor-btn">색 다시 고르기</button>
+    </div>
+    <div class="controls">
+      <b>P1</b> WASD 조종 · Shift 부스터 · Q 감속 · E 기관총 · R 미사일 · F 플레어 &nbsp;|&nbsp;
+      <b>P2</b> 방향키 · RShift 부스터 · / 감속 · . 기관총 · , 미사일 · RCtrl·M 플레어 &nbsp;|&nbsp;
+      <b>ESC</b> 일시정지 · <b>`</b> 음소거
     </div>
   </div>
 

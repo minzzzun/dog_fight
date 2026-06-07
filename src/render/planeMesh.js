@@ -40,6 +40,20 @@ export function buildPlane(color) {
   ab.visible = false;
   group.add(ab);
 
+  // 항법등(navigation lights): 밤에만 켜지는 양 날개 끝 작은 발광구.
+  //   좌현(port)=빨강, 우현(starboard)=초록 — 실제 항공기 관례. 주익 끝 x=±4.
+  const navGroup = new THREE.Group();
+  navGroup.name = 'navlights';
+  navGroup.visible = false;
+  const navGeo = new THREE.SphereGeometry(0.45, 8, 8);
+  const portLight = new THREE.Mesh(navGeo, new THREE.MeshBasicMaterial({ color: 0xff2200, fog: false }));
+  portLight.position.set(-4, 0, 0.5);     // 좌날개 끝 — 빨강
+  const starLight = new THREE.Mesh(navGeo, new THREE.MeshBasicMaterial({ color: 0x00ff33, fog: false }));
+  starLight.position.set(4, 0, 0.5);      // 우날개 끝 — 초록
+  navGroup.add(portLight);
+  navGroup.add(starLight);
+  group.add(navGroup);
+
   return group;
 }
 
@@ -52,6 +66,12 @@ export function setAfterburner(mesh, on, phase = 0) {
     const s = 1 + 0.3 * Math.sin(phase * 30);  // 길이 깜빡
     ab.scale.set(1, s, 1);
   }
+}
+
+// 항법등 on/off — 밤(isNight)일 때 켠다.
+export function setNavLights(mesh, on) {
+  const nav = mesh.getObjectByName('navlights');
+  if (nav) nav.visible = !!on;
 }
 
 // 비행 상태를 메시 위치·회전에 반영.

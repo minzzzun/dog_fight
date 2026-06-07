@@ -38,6 +38,7 @@ import {
   MISSILE_INIT_SPEED, MISSILE_MAX_SPEED, MISSILE_ACCEL,
   MAX_TURN_RATE, MISSILE_LIFE, MISSILE_RANGE, HIT_RADIUS,
   MUZZLE_OFFSET, FLARE_DECOY_RADIUS,
+  LOCK_CONE_NEAR, NEAR_RANGE, FAR_RANGE, effectiveLockCone,
   createMissileLauncher, canLock, stepLock, stepMissiles,
 } from './missile.js';
 import * as missileMod from './missile.js';
@@ -64,8 +65,8 @@ describe('상수 — seed 수치', () => {
   it('보유/락온/사거리/데미지 상수', () => {
     expect(MISSILE_AMMO).toBe(2);
     expect(LOCK_TIME).toBe(2);
-    expect(LOCK_CONE).toBeCloseTo(Math.PI / 180 * 15, 3); // ≈15°
-    expect(MIN_RANGE).toBe(150);
+    expect(LOCK_CONE).toBeCloseTo(Math.PI / 180 * 15, 3); // ≈15° (원거리 기준)
+    expect(MIN_RANGE).toBe(40);  // 근접 도그파이트 허용(완화)
     expect(MAX_RANGE).toBe(2000);
     expect(MISSILE_DAMAGE).toBe(50);
   });
@@ -122,8 +123,12 @@ describe('canLock — 콘/사거리 판정', () => {
     expect(canLock(shooter(), target({ x: 0, z: 600 }))).toBe(false);
   });
 
-  it('근거리(<MIN_RANGE, 정면 100m) → false', () => {
-    expect(canLock(shooter(), target({ z: -100 }))).toBe(false);
+  it('초근접(<MIN_RANGE, 정면 20m) → false', () => {
+    expect(canLock(shooter(), target({ z: -20 }))).toBe(false);
+  });
+
+  it('근접(MIN_RANGE 초과, 정면 100m)은 락 가능 → true (완화)', () => {
+    expect(canLock(shooter(), target({ z: -100 }))).toBe(true);
   });
 
   it('원거리(>MAX_RANGE, 정면 2500m) → false', () => {
@@ -167,6 +172,37 @@ describe('canLock — 콘/사거리 판정', () => {
   it('롤만 바꾸면 판정 불변(롤은 기수 방향 무관)', () => {
     const tgt = target({ z: -600 });
     expect(canLock(shooter({ roll: 0 }), tgt)).toBe(canLock(shooter({ roll: 1.2 }), tgt));
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+describe('근접 록온 보정 — 거리비례 콘 확대', () => {
+  it('상수: 근접콘(45°) > 기본콘(15°), NEAR_RANGE=MIN_RANGE, FAR_RANGE=500', () => {
+    expect(LOCK_CONE_NEAR).toBeCloseTo(Math.PI / 180 * 45, 3);
+    expect(LOCK_CONE_NEAR).toBeGreaterThan(LOCK_CONE);
+    expect(NEAR_RANGE).toBe(MIN_RANGE);
+    expect(FAR_RANGE).toBe(500);
+  });
+
+  it('effectiveLockCone: 근접→LOCK_CONE_NEAR, 원거리→LOCK_CONE, 그 사이 단조 감소', () => {
+    expect(effectiveLockCone(NEAR_RANGE)).toBeCloseTo(LOCK_CONE_NEAR, 6);
+    expect(effectiveLockCone(0)).toBeCloseTo(LOCK_CONE_NEAR, 6);        // NEAR 이하 클램프
+    expect(effectiveLockCone(FAR_RANGE)).toBeCloseTo(LOCK_CONE, 6);
+    expect(effectiveLockCone(99999)).toBeCloseTo(LOCK_CONE, 6);         // FAR 이상 클램프
+    // 중간(가까울수록 넓다)
+    const mid = effectiveLockCone((NEAR_RANGE + FAR_RANGE) / 2);
+    expect(mid).toBeLessThan(LOCK_CONE_NEAR);
+    expect(mid).toBeGreaterThan(LOCK_CONE);
+  });
+
+  it('근접(100m)에선 30° 빗각도 락 가능, 원거리(600m)에선 같은 각이 콘 밖', () => {
+    const deg30 = Math.PI / 180 * 30;
+    // 근접 100m, 30° 빗각 — 100m 콘은 ~41° 이라 안에 듦
+    const near = target({ x: 100 * Math.sin(deg30), z: -100 * Math.cos(deg30) });
+    expect(canLock(shooter(), near)).toBe(true);
+    // 원거리 600m, 30° 빗각 — 콘 15° 밖
+    const far = target({ x: 600 * Math.sin(deg30), z: -600 * Math.cos(deg30) });
+    expect(canLock(shooter(), far)).toBe(false);
   });
 });
 
