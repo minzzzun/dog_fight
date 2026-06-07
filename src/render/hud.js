@@ -1,90 +1,78 @@
-// render/hud.js (M5/M6) — 분할 화면 HUD (현재: 탄약/재장전 + 미사일 잔량/락온; M9에서 체력·플레어 확장)
+// render/hud.js (M9) — 분할 화면 HUD (폴리시: 체력바 + 정돈 레이아웃)
 //
-// 좌(P1)/우(P2) 각 절반 하단 중앙에 텍스트 패널을 띄운다. DOM 오버레이라
-// THREE 씬과 무관하게 그려진다. update(p1, p2)로 매 프레임 갱신.
-//   p1/p2 = { gun, launcher } — gun(M5 총기 상태), launcher(M6 런처 상태).
-//   하위호환: update(gun1, gun2)처럼 gun 객체를 직접 넘겨도 동작(launcher만 생략).
-
+// 각 절반(좌 P1 / 우 P2)에 DOM 오버레이로 그린다. THREE 씬과 무관.
+//   - 하단: 체력바 + 무기 상태(기관총/미사일/플레어 잔량·재장전 남은시간·락온)
+//   - 상단: 상대 방향 화살표(+거리), 피락온 경고
+//   - 중앙: 조준점, (별도 모듈) 록온 사각
+// update(p1, p2, dt): p1/p2 = { gun, launcher, dispenser, hp, target, lockedBy }
 import { LOCK_TIME, MISSILE_REGEN, MISSILE_AMMO } from '../weapons/missile.js';
 import { FLARE_REGEN, FLARE_AMMO } from '../weapons/flare.js';
+import { MAX_HP } from '../combat.js';
 
-function makePanel(leftPercent) {
-  const el = document.createElement('div');
-  el.style.cssText =
+// ── 하단 상태 패널(체력바 + 무기) ────────────────────────────────────
+function makeStatus(leftPercent) {
+  const wrap = document.createElement('div');
+  wrap.style.cssText =
     'position:fixed;bottom:16px;left:' + leftPercent + '%;transform:translateX(-50%);' +
-    'color:#fff;font-family:system-ui,monospace;font-size:18px;font-weight:700;' +
-    'text-shadow:0 1px 3px rgba(0,0,0,0.8);pointer-events:none;z-index:10;white-space:nowrap;' +
-    'text-align:center';
-  document.body.appendChild(el);
-  return el;
+    'display:flex;flex-direction:column;align-items:center;gap:6px;' +
+    'font-family:system-ui,monospace;pointer-events:none;z-index:10;white-space:nowrap';
+
+  // 체력바(테두리 + 채움 + 숫자)
+  const barOuter = document.createElement('div');
+  barOuter.style.cssText =
+    'width:240px;height:18px;border:2px solid rgba(255,255,255,0.85);border-radius:4px;' +
+    'background:rgba(0,0,0,0.45);overflow:hidden;position:relative';
+  const barFill = document.createElement('div');
+  barFill.style.cssText = 'height:100%;width:100%;background:#3ad13a;transition:width 0.15s linear';
+  const barText = document.createElement('div');
+  barText.style.cssText =
+    'position:absolute;inset:0;display:flex;align-items:center;justify-content:center;' +
+    'font-size:12px;font-weight:800;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.9)';
+  barOuter.appendChild(barFill);
+  barOuter.appendChild(barText);
+
+  // 무기 한 줄
+  const weapons = document.createElement('div');
+  weapons.style.cssText =
+    'font-size:15px;font-weight:700;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.85)';
+
+  wrap.appendChild(barOuter);
+  wrap.appendChild(weapons);
+  document.body.appendChild(wrap);
+  return { barFill, barText, weapons };
+}
+
+function hpColor(frac) {
+  if (frac > 0.5) return '#3ad13a';   // 초록
+  if (frac > 0.25) return '#ffcc33';  // 노랑
+  return '#ff3b30';                   // 빨강
 }
 
 function fmtGun(gun) {
   if (!gun) return '';
-  if (gun.reloading) return '🔄 재장전…';
-  return `🔫 ${gun.ammo} / 100`;
+  return gun.reloading ? '🔫 재장전…' : `🔫 ${gun.ammo}/100`;
 }
 
-// 체력 한 줄(최소 표시; M9에서 체력바로 폴리시). hp 없으면 빈 문자열.
-function fmtHp(hp) {
-  if (typeof hp !== 'number') return '';
-  return `❤️ ${Math.max(0, Math.round(hp))}`;
-}
-
-// 런처 잔량 + 락온 상태 + 플레어 잔량 한 줄. launcher 없으면 빈 문자열.
-function fmtMissile(launcher, dispenser) {
+function fmtMissile(launcher) {
   if (!launcher) return '';
   let lock;
-  if (launcher.locked) {
-    lock = '🔒 발사가능';
-  } else if (launcher.lockTimer > 0) {
-    const pct = Math.min(100, Math.round((launcher.lockTimer / LOCK_TIME) * 100));
-    lock = `락온 ${pct}%`;
-  } else {
-    lock = '—';
-  }
-  // 재장전 남은 시간(잔량이 최대 미만일 때만). ↻Ns
-  const mReload = launcher.ammo < MISSILE_AMMO
-    ? ` ↻${Math.ceil(MISSILE_REGEN - (launcher.regenTimer ?? 0))}s` : '';
-  let flare = '';
-  if (dispenser) {
-    const fReload = dispenser.ammo < FLARE_AMMO
-      ? ` ↻${Math.ceil(FLARE_REGEN - (dispenser.regenTimer ?? 0))}s` : '';
-    flare = `   ✦ ${dispenser.ammo}${fReload}`;
-  }
-  return `🚀 ${launcher.ammo}${mReload}   ${lock}${flare}`;
+  if (launcher.locked) lock = '🔒';
+  else if (launcher.lockTimer > 0) lock = `락온 ${Math.min(100, Math.round((launcher.lockTimer / LOCK_TIME) * 100))}%`;
+  else lock = '';
+  const reload = launcher.ammo < MISSILE_AMMO
+    ? `↻${Math.ceil(MISSILE_REGEN - (launcher.regenTimer ?? 0))}s` : '';
+  return `🚀 ${launcher.ammo}${reload ? ' ' + reload : ''}${lock ? '  ' + lock : ''}`;
 }
 
-// 인자 정규화: { gun, launcher, target, dispenser, hp, lockedBy } 또는 gun 직접.
-function normalize(state) {
-  const empty = { gun: null, launcher: null, target: null, dispenser: null, hp: null, lockedBy: null };
-  if (!state) return empty;
-  if (state.gun || state.launcher || state.target || state.dispenser || typeof state.hp === 'number' || state.lockedBy) {
-    return {
-      gun: state.gun || null,
-      launcher: state.launcher || null,
-      target: state.target || null,
-      dispenser: state.dispenser || null,
-      hp: typeof state.hp === 'number' ? state.hp : null,
-      lockedBy: state.lockedBy || null,
-    };
-  }
-  return { ...empty, gun: state };  // 하위호환: gun 객체 직접
+function fmtFlare(dispenser) {
+  if (!dispenser) return '';
+  const reload = dispenser.ammo < FLARE_AMMO
+    ? `↻${Math.ceil(FLARE_REGEN - (dispenser.regenTimer ?? 0))}s` : '';
+  return `✦ ${dispenser.ammo}${reload ? ' ' + reload : ''}`;
 }
 
-// 피락온 경고(각 절반 상단, 화살표 아래). 상대가 나를 락온 중/완료면 표시.
-function makeWarn(leftPercent) {
-  const el = document.createElement('div');
-  el.style.cssText =
-    'position:fixed;top:74px;left:' + leftPercent + '%;transform:translateX(-50%);' +
-    'font-family:system-ui,monospace;font-weight:800;font-size:20px;' +
-    'text-shadow:0 1px 4px rgba(0,0,0,0.9);pointer-events:none;z-index:12;display:none';
-  document.body.appendChild(el);
-  return el;
-}
-
-// 상대 방향 화살표(각 절반 상단 중앙). 멀 때만 표시.
-const ARROW_SHOW_DIST = 300;  // 이 거리(m) 이상이면 방향 화살표 표시
+// ── 상대 방향 화살표 ─────────────────────────────────────────────────
+const ARROW_SHOW_DIST = 300;
 
 function makeArrow(leftPercent) {
   const wrap = document.createElement('div');
@@ -93,7 +81,7 @@ function makeArrow(leftPercent) {
     'text-align:center;color:#ffd24a;font-family:system-ui,monospace;font-weight:700;' +
     'text-shadow:0 1px 3px rgba(0,0,0,0.8);pointer-events:none;z-index:10;white-space:nowrap';
   const arrow = document.createElement('div');
-  arrow.textContent = '➤';                       // 기본 오른쪽 향함 → 회전으로 방향 지정
+  arrow.textContent = '➤';
   arrow.style.cssText = 'font-size:34px;line-height:1;transition:transform 0.05s linear';
   const label = document.createElement('div');
   label.style.cssText = 'font-size:13px;margin-top:2px';
@@ -103,7 +91,18 @@ function makeArrow(leftPercent) {
   return { wrap, arrow, label };
 }
 
-// 각 절반 화면 중앙 조준점(+) — 기관총 조준 기준. 고정 표시.
+// ── 피락온 경고 ──────────────────────────────────────────────────────
+function makeWarn(leftPercent) {
+  const el = document.createElement('div');
+  el.style.cssText =
+    'position:fixed;top:78px;left:' + leftPercent + '%;transform:translateX(-50%);' +
+    'font-family:system-ui,monospace;font-weight:800;font-size:20px;' +
+    'text-shadow:0 1px 4px rgba(0,0,0,0.9);pointer-events:none;z-index:12;display:none';
+  document.body.appendChild(el);
+  return el;
+}
+
+// ── 중앙 조준점 ──────────────────────────────────────────────────────
 function makeCrosshair(leftPercent) {
   const el = document.createElement('div');
   el.style.cssText =
@@ -112,52 +111,45 @@ function makeCrosshair(leftPercent) {
     'pointer-events:none;z-index:9;text-shadow:0 0 3px rgba(0,0,0,0.9)';
   el.textContent = '+';
   document.body.appendChild(el);
-  return el;
 }
 
 export function createHud() {
-  const left = makePanel(25);   // 좌측 절반 중앙(하단)
-  const right = makePanel(75);  // 우측 절반 중앙(하단)
-  const arrowL = makeArrow(25); // 좌측 상단 방향 화살표
+  const statusL = makeStatus(25);
+  const statusR = makeStatus(75);
+  const arrowL = makeArrow(25);
   const arrowR = makeArrow(75);
-  const warnL = makeWarn(25);   // 좌/우 피락온 경고
+  const warnL = makeWarn(25);
   const warnR = makeWarn(75);
-  makeCrosshair(25);            // 좌/우 조준점(고정)
+  makeCrosshair(25);
   makeCrosshair(75);
-  let blink = 0;                // 락온 완료 경고 깜빡임 위상
+  let blink = 0;
 
-  function render(panel, state) {
-    const { gun, launcher, dispenser, hp } = normalize(state);
-    const hpLine = fmtHp(hp);
-    const line1 = fmtGun(gun);
-    const line2 = fmtMissile(launcher, dispenser);
-    const lines = [hpLine, line1, line2].filter((s) => s);
-    panel.innerHTML = lines.join('<br>');
+  function renderStatus(s, state) {
+    // 체력바
+    const hp = typeof state?.hp === 'number' ? state.hp : MAX_HP;
+    const frac = Math.max(0, Math.min(1, hp / MAX_HP));
+    s.barFill.style.width = `${frac * 100}%`;
+    s.barFill.style.background = hpColor(frac);
+    s.barText.textContent = `${Math.max(0, Math.round(hp))} / ${MAX_HP}`;
+    // 무기 한 줄
+    const parts = [fmtGun(state?.gun), fmtMissile(state?.launcher), fmtFlare(state?.dispenser)].filter(Boolean);
+    s.weapons.textContent = parts.join('   ');
   }
 
-  // 방향 화살표: target.angle(rad, 0=정면/위, +=오른쪽)만큼 회전. 멀 때만 표시.
   function renderArrow(ind, state) {
-    const { target } = normalize(state);
-    if (!target || target.distance < ARROW_SHOW_DIST) {
-      ind.wrap.style.display = 'none';
-      return;
-    }
+    const target = state?.target;
+    if (!target || target.distance < ARROW_SHOW_DIST) { ind.wrap.style.display = 'none'; return; }
     ind.wrap.style.display = 'block';
-    // 기본 글리프 '➤'가 오른쪽(+90°)을 향하므로, 위(0°)=정면 기준으로 -90° 보정.
     const deg = (target.angle * 180) / Math.PI - 90;
     ind.arrow.style.transform = `rotate(${deg}deg)`;
     ind.label.textContent = `상대 ${Math.round(target.distance)}m`;
   }
 
-  // 피락온 경고: lockedBy.locked면 빨강 깜빡 "미사일 락!", locking이면 노랑 "락온 경고".
   function renderWarn(el, state) {
-    const { lockedBy } = normalize(state);
-    if (!lockedBy || (!lockedBy.locked && !lockedBy.locking)) {
-      el.style.display = 'none';
-      return;
-    }
-    if (lockedBy.locked) {
-      el.style.display = blink < 0.5 ? 'block' : 'none';  // 깜빡임
+    const lb = state?.lockedBy;
+    if (!lb || (!lb.locked && !lb.locking)) { el.style.display = 'none'; return; }
+    if (lb.locked) {
+      el.style.display = blink < 0.5 ? 'block' : 'none';
       el.style.color = '#ff3030';
       el.textContent = '🔴 미사일 락!';
     } else {
@@ -168,9 +160,9 @@ export function createHud() {
   }
 
   function update(p1, p2, dt = 0) {
-    blink = (blink + dt) % 1;   // 0~1 깜빡임 위상(0.5s 주기)
-    render(left, p1);
-    render(right, p2);
+    blink = (blink + dt) % 1;
+    renderStatus(statusL, p1);
+    renderStatus(statusR, p2);
     renderArrow(arrowL, p1);
     renderArrow(arrowR, p2);
     renderWarn(warnL, p1);
