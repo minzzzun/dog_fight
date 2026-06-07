@@ -5,7 +5,8 @@
 //   p1/p2 = { gun, launcher } — gun(M5 총기 상태), launcher(M6 런처 상태).
 //   하위호환: update(gun1, gun2)처럼 gun 객체를 직접 넘겨도 동작(launcher만 생략).
 
-import { LOCK_TIME } from '../weapons/missile.js';
+import { LOCK_TIME, MISSILE_REGEN, MISSILE_AMMO } from '../weapons/missile.js';
+import { FLARE_REGEN, FLARE_AMMO } from '../weapons/flare.js';
 
 function makePanel(leftPercent) {
   const el = document.createElement('div');
@@ -42,23 +43,44 @@ function fmtMissile(launcher, dispenser) {
   } else {
     lock = '—';
   }
-  const flare = dispenser ? `   ✦ ${dispenser.ammo}` : '';
-  return `🚀 ${launcher.ammo}   ${lock}${flare}`;
+  // 재장전 남은 시간(잔량이 최대 미만일 때만). ↻Ns
+  const mReload = launcher.ammo < MISSILE_AMMO
+    ? ` ↻${Math.ceil(MISSILE_REGEN - (launcher.regenTimer ?? 0))}s` : '';
+  let flare = '';
+  if (dispenser) {
+    const fReload = dispenser.ammo < FLARE_AMMO
+      ? ` ↻${Math.ceil(FLARE_REGEN - (dispenser.regenTimer ?? 0))}s` : '';
+    flare = `   ✦ ${dispenser.ammo}${fReload}`;
+  }
+  return `🚀 ${launcher.ammo}${mReload}   ${lock}${flare}`;
 }
 
-// 인자 정규화: { gun, launcher, target } 또는 gun 객체 직접 전달 모두 수용.
+// 인자 정규화: { gun, launcher, target, dispenser, hp, lockedBy } 또는 gun 직접.
 function normalize(state) {
-  if (!state) return { gun: null, launcher: null, target: null, dispenser: null };
-  if (state.gun || state.launcher || state.target || state.dispenser || typeof state.hp === 'number') {
+  const empty = { gun: null, launcher: null, target: null, dispenser: null, hp: null, lockedBy: null };
+  if (!state) return empty;
+  if (state.gun || state.launcher || state.target || state.dispenser || typeof state.hp === 'number' || state.lockedBy) {
     return {
       gun: state.gun || null,
       launcher: state.launcher || null,
       target: state.target || null,
       dispenser: state.dispenser || null,
       hp: typeof state.hp === 'number' ? state.hp : null,
+      lockedBy: state.lockedBy || null,
     };
   }
-  return { gun: state, launcher: null, target: null, dispenser: null, hp: null };  // 하위호환: gun 객체 직접
+  return { ...empty, gun: state };  // 하위호환: gun 객체 직접
+}
+
+// 피락온 경고(각 절반 상단, 화살표 아래). 상대가 나를 락온 중/완료면 표시.
+function makeWarn(leftPercent) {
+  const el = document.createElement('div');
+  el.style.cssText =
+    'position:fixed;top:74px;left:' + leftPercent + '%;transform:translateX(-50%);' +
+    'font-family:system-ui,monospace;font-weight:800;font-size:20px;' +
+    'text-shadow:0 1px 4px rgba(0,0,0,0.9);pointer-events:none;z-index:12;display:none';
+  document.body.appendChild(el);
+  return el;
 }
 
 // 상대 방향 화살표(각 절반 상단 중앙). 멀 때만 표시.
@@ -98,8 +120,11 @@ export function createHud() {
   const right = makePanel(75);  // 우측 절반 중앙(하단)
   const arrowL = makeArrow(25); // 좌측 상단 방향 화살표
   const arrowR = makeArrow(75);
+  const warnL = makeWarn(25);   // 좌/우 피락온 경고
+  const warnR = makeWarn(75);
   makeCrosshair(25);            // 좌/우 조준점(고정)
   makeCrosshair(75);
+  let blink = 0;                // 락온 완료 경고 깜빡임 위상
 
   function render(panel, state) {
     const { gun, launcher, dispenser, hp } = normalize(state);
@@ -124,11 +149,32 @@ export function createHud() {
     ind.label.textContent = `상대 ${Math.round(target.distance)}m`;
   }
 
-  function update(p1, p2) {
+  // 피락온 경고: lockedBy.locked면 빨강 깜빡 "미사일 락!", locking이면 노랑 "락온 경고".
+  function renderWarn(el, state) {
+    const { lockedBy } = normalize(state);
+    if (!lockedBy || (!lockedBy.locked && !lockedBy.locking)) {
+      el.style.display = 'none';
+      return;
+    }
+    if (lockedBy.locked) {
+      el.style.display = blink < 0.5 ? 'block' : 'none';  // 깜빡임
+      el.style.color = '#ff3030';
+      el.textContent = '🔴 미사일 락!';
+    } else {
+      el.style.display = 'block';
+      el.style.color = '#ffd24a';
+      el.textContent = '⚠️ 락온 경고';
+    }
+  }
+
+  function update(p1, p2, dt = 0) {
+    blink = (blink + dt) % 1;   // 0~1 깜빡임 위상(0.5s 주기)
     render(left, p1);
     render(right, p2);
     renderArrow(arrowL, p1);
     renderArrow(arrowR, p2);
+    renderWarn(warnL, p1);
+    renderWarn(warnR, p2);
   }
 
   return { update };

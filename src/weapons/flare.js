@@ -15,6 +15,7 @@ export const FLARE_RADIUS   = FLARE_DECOY_RADIUS; // 디코이 반경(m) — mis
 
 // 전개 직후 뒤/아래로 분리되는 초기 속도(시각/감각용). 0이면 고정 위치.
 export const FLARE_DROP_SPEED = 25;               // (m/s) — 디코이 판정엔 영향 없음
+export const FLARE_REGEN     = 180;               // 시간 재장전(초/발) — 최대 FLARE_AMMO(3)까지
 
 // ── 생성 ─────────────────────────────────────────────────────────────
 
@@ -23,6 +24,7 @@ export function createFlareDispenser() {
   return {
     ammo: FLARE_AMMO,   // 남은 플레어 수(시작 3)
     cooldown: 0,        // 전개 쿨다운 잔여(초). 0 이하여야 전개 가능
+    regenTimer: 0,      // 시간 재장전 누적(초). FLARE_REGEN 도달 시 +1발
   };
 }
 
@@ -56,6 +58,17 @@ export function stepFlareDispenser(state, ctx, dt) {
 
   // (a) 쿨다운 감소(매 스텝, 0 바닥 클램프)
   if (next.cooldown > 0) next.cooldown = Math.max(0, next.cooldown - dt);
+
+  // (a2) 시간 재장전 — ammo < MAX 면 누적, FLARE_REGEN 도달 시 +1(최대 FLARE_AMMO).
+  if (next.ammo < FLARE_AMMO) {
+    next.regenTimer = (next.regenTimer ?? 0) + dt;
+    if (next.regenTimer >= FLARE_REGEN) {
+      next.ammo += 1;
+      next.regenTimer -= FLARE_REGEN;
+    }
+  } else {
+    next.regenTimer = 0;
+  }
 
   // (b) 전개 가능: 키 엣지 && 쿨다운 끝 && 잔량 있음
   if (ctx.deploy && next.cooldown <= 0 && next.ammo > 0) {

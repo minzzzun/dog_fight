@@ -288,3 +288,27 @@ describe('missile 디코이와 호환 (통합 케이스)', () => {
     expect(r.missiles.length).toBe(0);
   });
 });
+
+// ── 플레어 시간 재장전 (보강) ───────────────────────────────────────
+import { FLARE_REGEN, FLARE_AMMO as FLARE_AMMO_MAX, createFlareDispenser as mkDisp, stepFlareDispenser as stepDisp } from './flare.js';
+
+describe('플레어 시간 재장전(FLARE_REGEN)', () => {
+  const ctx = { deploy: false, owner: 0, pos: { x: 0, y: 0, z: 0 } };
+
+  it('FLARE_REGEN=180', () => {
+    expect(FLARE_REGEN).toBe(180);
+  });
+
+  it('ammo 0에서 180초 경과 → 1발 재충전', () => {
+    let s = { ...mkDisp(), ammo: 0 };
+    s = stepDisp(s, ctx, 180).state;
+    expect(s.ammo).toBe(1);
+  });
+
+  it('최대 FLARE_AMMO(3) 초과 재충전 안 됨', () => {
+    let s = { ...mkDisp(), ammo: 2 };
+    s = stepDisp(s, ctx, 180).state;   // →3
+    s = stepDisp(s, ctx, 180).state;   // 유지(3)
+    expect(s.ammo).toBe(FLARE_AMMO_MAX);
+  });
+});

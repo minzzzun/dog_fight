@@ -15,7 +15,7 @@ export const MISSILE_AMMO  = 2;              // 플레이어당 보유 미사일
 export const LOCK_TIME      = 2;             // 락온 누적 소요(초)
 export const LOCK_CONE      = Math.PI / 180 * 15;  // 락 콘 반각(rad) ≈ 15° ≈ 0.262
 export const MIN_RANGE      = 150;          // 최소 사거리(m) — 이보다 가까우면 락/발사 불가
-export const MAX_RANGE      = 1200;         // 최대 사거리(m) — 이보다 멀면 락/발사 불가
+export const MAX_RANGE      = 2000;         // 최대 사거리(m) — 이보다 멀면 락/발사 불가
 export const MISSILE_DAMAGE = 50;           // 1발 명중당 데미지
 
 // 미사일 비행 — 가속 모델: 발사 직후 기체보다 살짝 빠른 속도에서 시작해 점점 가속.
@@ -25,6 +25,7 @@ export const MISSILE_ACCEL      = 130;      // 가속도(m/s²)
 export const MAX_TURN_RATE  = 2.2;          // 유도 최대 선회율(rad/s) — 즉시 못 꺾음(회피 여지)
 export const MISSILE_LIFE   = 8.0;          // 수명(초)
 export const MISSILE_RANGE  = MISSILE_MAX_SPEED * MISSILE_LIFE; // 파생 참고값
+export const MISSILE_REGEN  = 60;           // 시간 재장전(초/발) — 최대 MISSILE_AMMO(2)까지
 
 // 명중 판정
 export const HIT_RADIUS     = 18;           // 기체 명중 반경(m) — gun(12)보다 관대(폭발 반경 근사)
@@ -130,6 +131,7 @@ export function createMissileLauncher() {
     lockTarget: null,     // 락온 진행/완료 대상 owner index(없으면 null)
     lockTimer: 0,         // 락온 누적 시간(초). LOCK_TIME 도달 시 완료
     locked: false,        // 락 완료 여부(발사 가능)
+    regenTimer: 0,        // 시간 재장전 누적(초). MISSILE_REGEN 도달 시 +1발
   };
 }
 
@@ -161,6 +163,25 @@ function spawnMissile(shooter, targetOwner) {
 export function stepLock(launcher, ctx, dt) {
   const next = { ...launcher };
   let fired = null;
+
+  // 시간 재장전 — ammo < MAX 면 누적, MISSILE_REGEN 도달 시 +1(최대 MISSILE_AMMO).
+  if (next.ammo < MISSILE_AMMO) {
+    next.regenTimer = (next.regenTimer ?? 0) + dt;
+    if (next.regenTimer >= MISSILE_REGEN) {
+      next.ammo += 1;
+      next.regenTimer -= MISSILE_REGEN;
+    }
+  } else {
+    next.regenTimer = 0;
+  }
+
+  // 미사일 0발이면 락온 불가(진행/완료 차단). 재장전만 계속.
+  if (next.ammo <= 0) {
+    next.lockTimer = 0;
+    next.locked = false;
+    next.lockTarget = null;
+    return { launcher: next, fired: null };
+  }
 
   const inEnvelope = canLock(ctx.shooter, ctx.target);
 

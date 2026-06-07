@@ -322,9 +322,13 @@ function animate() {
   // 상대 방향 표시기 — 각 플레이어가 본 상대 기체 방위·거리
   const ind1 = targetIndicator(plane1, plane2);
   const ind2 = targetIndicator(plane2, plane1);
-  hud.update(                             // 체력 + 탄약/재장전 + 미사일 잔량/락온 + 플레어 잔량 + 상대 방향
-    { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1, hp: combat.players[0].hp },
-    { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2, hp: combat.players[1].hp },
+  // 피락온 경고 — 내가 상대 런처의 락 대상이고 진행/완료면 경고. (p0은 launcher2, p1은 launcher1)
+  const lockedBy0 = { locking: launcher2.lockTarget === 0 && launcher2.lockTimer > 0 && !launcher2.locked, locked: launcher2.lockTarget === 0 && launcher2.locked };
+  const lockedBy1 = { locking: launcher1.lockTarget === 1 && launcher1.lockTimer > 0 && !launcher1.locked, locked: launcher1.lockTarget === 1 && launcher1.locked };
+  hud.update(                             // 체력 + 탄약/재장전 + 미사일 잔량/락온 + 플레어 + 상대 방향 + 피락온 경고
+    { gun: gun1, launcher: launcher1, dispenser: disp1, target: ind1, hp: combat.players[0].hp, lockedBy: lockedBy0 },
+    { gun: gun2, launcher: launcher2, dispenser: disp2, target: ind2, hp: combat.players[1].hp, lockedBy: lockedBy1 },
+    dt,
   );
 
   applyChase(cameraL, plane1);   // 좌 = P1

@@ -66,7 +66,7 @@ describe('상수 — seed 수치', () => {
     expect(LOCK_TIME).toBe(2);
     expect(LOCK_CONE).toBeCloseTo(Math.PI / 180 * 15, 3); // ≈15°
     expect(MIN_RANGE).toBe(150);
-    expect(MAX_RANGE).toBe(1200);
+    expect(MAX_RANGE).toBe(2000);
     expect(MISSILE_DAMAGE).toBe(50);
   });
 
@@ -125,8 +125,8 @@ describe('canLock — 콘/사거리 판정', () => {
     expect(canLock(shooter(), target({ z: -100 }))).toBe(false);
   });
 
-  it('원거리(>MAX_RANGE, 정면 1500m) → false', () => {
-    expect(canLock(shooter(), target({ z: -1500 }))).toBe(false);
+  it('원거리(>MAX_RANGE, 정면 2500m) → false', () => {
+    expect(canLock(shooter(), target({ z: -2500 }))).toBe(false);
   });
 
   it('사거리 경계 안쪽(MIN+1, MAX-1)은 콘 안이면 true', () => {
@@ -576,5 +576,45 @@ describe('turnToward — 선회율 제한 1스텝 (export 시)', () => {
     const out = missileMod.turnToward(v, v, 0.3);
     expect(len(out)).toBeCloseTo(1, 5);
     expect(angleBetween(v, out)).toBeCloseTo(0, 5);
+  });
+});
+
+// ── 시간 재장전 + 0발 락온 차단 (보강) ──────────────────────────────
+describe('미사일 시간 재장전(MISSILE_REGEN)·0발 락온 차단', () => {
+  const shooter = { x: 0, y: 300, z: 0, yaw: 0, pitch: 0, roll: 0, owner: 0 };
+  // 정면(-Z) 콘 안, 사거리 내 상대 → 락온 엔벨로프 충족
+  const target = { owner: 1, x: 0, y: 300, z: -400, alive: true };
+  const ctx = (tryLock = false) => ({ tryLock, shooter, target });
+
+  it('MISSILE_REGEN=60', () => {
+    expect(missileMod.MISSILE_REGEN).toBe(60);
+  });
+
+  it('ammo 0에서 60초 경과 → 1발 재충전', () => {
+    let l = { ...missileMod.createMissileLauncher(), ammo: 0 };
+    l = missileMod.stepLock(l, ctx(), 60).launcher;
+    expect(l.ammo).toBe(1);
+  });
+
+  it('최대 MISSILE_AMMO(2) 초과 재충전 안 됨', () => {
+    let l = { ...missileMod.createMissileLauncher(), ammo: 0 };
+    l = missileMod.stepLock(l, ctx(), 60).launcher;   // →1
+    l = missileMod.stepLock(l, ctx(), 60).launcher;   // →2
+    l = missileMod.stepLock(l, ctx(), 60).launcher;   // 유지(2)
+    expect(l.ammo).toBe(2);
+  });
+
+  it('ammo 0이면 락온 진행 안 됨(엔벨로프 충족이어도)', () => {
+    let l = { ...missileMod.createMissileLauncher(), ammo: 0, regenTimer: 0 };
+    // 1초 락온 시도(60초 미만이라 재충전도 없음)
+    l = missileMod.stepLock(l, ctx(), 1).launcher;
+    expect(l.locked).toBe(false);
+    expect(l.lockTimer).toBe(0);
+  });
+
+  it('ammo 있으면 락온 정상 진행', () => {
+    let l = missileMod.createMissileLauncher();   // ammo 2
+    l = missileMod.stepLock(l, ctx(), 1).launcher;
+    expect(l.lockTimer).toBeGreaterThan(0);
   });
 });
