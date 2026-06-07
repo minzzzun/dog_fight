@@ -174,22 +174,12 @@ export function stepFlight(state, input, dt) {
   let speed = moveToward(state.speed, target, rate * dt);
   speed = clamp(speed, MIN_SPEED, MAX_SPEED);
 
-  // (b) 롤 — 입력 적분 또는 0으로 복원
-  let roll;
-  if (input.roll !== 0) {
-    roll = state.roll + input.roll * ROLL_RATE * dt;
-  } else {
-    roll = moveToward(state.roll, 0, ROLL_LEVEL_RATE * dt);
-  }
+  // (b) 롤 — 각도 유지(hold-attitude): 입력 적분, 손 떼면 현재 자세 유지(자동 복원 없음).
+  let roll = state.roll + input.roll * ROLL_RATE * dt;
   roll = clamp(roll, -ROLL_LIMIT, ROLL_LIMIT);
 
-  // (c) 피치 — 입력 적분 또는 0으로 완만 복원
-  let pitch;
-  if (input.pitch !== 0) {
-    pitch = state.pitch + input.pitch * PITCH_RATE * dt;
-  } else {
-    pitch = moveToward(state.pitch, 0, PITCH_LEVEL_RATE * dt);
-  }
+  // (c) 피치 — 각도 유지: 입력 적분, 손 떼면 그대로 유지(자동 복원 없음).
+  let pitch = state.pitch + input.pitch * PITCH_RATE * dt;
   pitch = clamp(pitch, -PITCH_LIMIT, PITCH_LIMIT);
 
   // (d) yaw — 뱅크턴(우뱅크=우선회=yaw 감소) + 경계 강제선회

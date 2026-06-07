@@ -171,48 +171,31 @@ describe('롤 적분', () => {
   });
 });
 
-describe('자동 수평 안정 (무입력 복원)', () => {
-  it('roll≠0에서 무입력 → 0으로 단조 수렴(오버슈트 없음)', () => {
-    // 먼저 롤을 만들고
+describe('각도 유지 (hold-attitude, 자동 복원 없음)', () => {
+  it('roll 만든 뒤 무입력 → roll 유지(복원 안 됨)', () => {
     let p = createPlane();
     for (let i = 0; i < 5; i++) p = stepFlight(p, input({ roll: 1 }), 0.05);
-    expect(p.roll).toBeGreaterThan(0);
-    // 무입력으로 복원: 단조 감소, 부호 안 바뀜
-    let prev = p.roll;
-    for (let i = 0; i < 100; i++) {
-      p = stepFlight(p, input(), 0.05);
-      expect(p.roll).toBeLessThanOrEqual(prev + 1e-9); // 단조 비증가
-      expect(p.roll).toBeGreaterThanOrEqual(0);        // 0 아래로 안 넘음
-      prev = p.roll;
-    }
-    expect(p.roll).toBeCloseTo(0, 5); // 결국 0 수렴
+    const held = p.roll;
+    expect(held).toBeGreaterThan(0);
+    for (let i = 0; i < 100; i++) p = stepFlight(p, input(), 0.05);
+    expect(p.roll).toBeCloseTo(held, 6);   // 그대로 유지
   });
 
-  it('pitch≠0에서 무입력 → 0으로 수렴', () => {
+  it('pitch 만든 뒤 무입력 → pitch 유지', () => {
     let p = createPlane();
     for (let i = 0; i < 5; i++) p = stepFlight(p, input({ pitch: 1 }), 0.05);
-    expect(p.pitch).toBeGreaterThan(0);
-    let prev = p.pitch;
-    for (let i = 0; i < 200; i++) {
-      p = stepFlight(p, input(), 0.05);
-      expect(p.pitch).toBeLessThanOrEqual(prev + 1e-9);
-      expect(p.pitch).toBeGreaterThanOrEqual(0);
-      prev = p.pitch;
-    }
-    expect(p.pitch).toBeCloseTo(0, 4);
+    const held = p.pitch;
+    expect(held).toBeGreaterThan(0);
+    for (let i = 0; i < 100; i++) p = stepFlight(p, input(), 0.05);
+    expect(p.pitch).toBeCloseTo(held, 6);
   });
 
-  it('피치 복원 속도 < 롤 복원 속도 (한 스텝 변화량 비교)', () => {
-    // 같은 초기각에서 한 스텝 복원량을 비교
-    const dt = 0.05;
-    const start = 0.5;
-    const rollState = { x: 0, y: SPAWN_Y, z: 0, yaw: 0, pitch: 0, roll: start, speed: BASE_SPEED, warning: false };
-    const pitchState = { x: 0, y: SPAWN_Y, z: 0, yaw: 0, pitch: start, roll: 0, speed: BASE_SPEED, warning: false };
-    const r = stepFlight(rollState, input(), dt);
-    const pp = stepFlight(pitchState, input(), dt);
-    const rollDrop = start - r.roll;
-    const pitchDrop = start - pp.pitch;
-    expect(pitchDrop).toBeLessThan(rollDrop); // 피치가 더 완만
+  it('롤을 기울인 채 두면 무입력이어도 yaw가 계속 변함(뱅크턴 지속)', () => {
+    let p = createPlane();
+    for (let i = 0; i < 5; i++) p = stepFlight(p, input({ roll: 1 }), 0.05);
+    const yaw0 = p.yaw;
+    for (let i = 0; i < 10; i++) p = stepFlight(p, input(), 0.05);  // 손 뗀 채
+    expect(p.yaw).not.toBeCloseTo(yaw0, 3);   // 기운 채라 계속 선회
   });
 });
 
